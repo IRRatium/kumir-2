@@ -184,9 +184,14 @@ static ASTNode* parse_func_def() {
 ASTNode* parse(const char* source) {
     src_ptr = source; current_line = 1; advance();
     ASTNode* program = create_node(AST_PROGRAM);
+
     while (current_token.type != TOKEN_EOF) {
         if (current_token.type == TOKEN_ISPOLZOVAT) {
-            advance(); char libname[256]; strcpy(libname, current_token.value); advance();
+            int err_line = current_line; // Запоминаем строку
+            advance(); 
+            char libname[256]; strcpy(libname, current_token.value); 
+            advance();
+            
             char* lib_source = read_file_content(libname);
             if (lib_source) {
                 const char* old_src = src_ptr; int old_line = current_line; Token old_token = current_token;
@@ -195,9 +200,18 @@ ASTNode* parse(const char* source) {
                     if (current_token.type == TOKEN_ALG) add_child(program, parse_func_def()); else advance();
                 }
                 src_ptr = old_src; current_line = old_line; current_token = old_token; free(lib_source);
+            } else {
+                // ТЕПЕРЬ ОН БУДЕТ ГРОМКО ОРАТЬ, ЕСЛИ ФАЙЛ НЕ НАЙДЕН
+                parse_error(err_line, "КРИТИЧЕСКАЯ ОШИБКА: Не удалось найти или открыть библиотеку", libname);
             }
-        } else if (current_token.type == TOKEN_ALG) add_child(program, parse_func_def());
-        else parse_error(current_token.line, "Ожидалось 'алг'", current_token.value);
+        } else if (current_token.type == TOKEN_ALG) {
+            add_child(program, parse_func_def());
+        } else {
+            parse_error(current_token.line, "Ожидалось 'алг' или 'использовать'", current_token.value);
+        }
     }
     return program;
 }
+
+
+
