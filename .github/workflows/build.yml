@@ -1,24 +1,22 @@
 name: Build Kumir 2 (Windows EXE)
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  workflow_dispatch: # Эта строчка добавляет кнопку "Run workflow" в GitHub Actions
 
 jobs:
   build-windows:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v4 # Обновили до v4
 
     - name: Compile C source code
       run: |
         gcc -O3 src/main.c src/lexer.c src/parser.c src/interpreter.c -o kumir2.exe
 
     - name: Upload EXE artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4 # Обновили до v4 (ошибка ушла)
       with:
         name: kumir2-windows
         path: kumir2.exe
