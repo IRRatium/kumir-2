@@ -51,11 +51,38 @@ Token get_next_token(const char** source, int* line) {
         token.value = kumir_strndup(start, *source - start); return token;
     }
 
+    // НОВАЯ ОБРАБОТКА СТРОК (с поддержкой \r \n \t \")
     if (**source == '"') {
-        (*source)++; const char* start = *source;
-        while (**source != '"' && **source != '\0') { if (**source == '\n') (*line)++; (*source)++; }
-        token.type = TOKEN_STRING; token.value = kumir_strndup(start, *source - start);
-        if (**source == '"') (*source)++; return token;
+        (*source)++;
+        int cap = 256; 
+        char* buf = malloc(cap); 
+        int i = 0;
+        
+        while (**source != '"' && **source != '\0') {
+            if (i >= cap - 2) { cap *= 2; buf = realloc(buf, cap); }
+            
+            if (**source == '\\') {
+                (*source)++;
+                if (**source == '\0') break;
+                if (**source == 'n') buf[i++] = '\n';
+                else if (**source == 'r') buf[i++] = '\r';
+                else if (**source == 't') buf[i++] = '\t';
+                else if (**source == '"') buf[i++] = '"';
+                else if (**source == '\\') buf[i++] = '\\';
+                else buf[i++] = **source;
+                (*source)++;
+            } else {
+                if (**source == '\n') (*line)++;
+                buf[i++] = **source;
+                (*source)++;
+            }
+        }
+        buf[i] = '\0';
+        token.type = TOKEN_STRING; 
+        token.value = buf;
+        
+        if (**source == '"') (*source)++;
+        return token;
     }
 
     const char* start = *source;
