@@ -4,12 +4,10 @@ int current_line = 1;
 Token current_token;
 const char* src_ptr;
 
-// Функция для получения следующего токена с учетом строки
 void advance() {
     current_token = get_next_token(&src_ptr, &current_line);
 }
 
-// Вывод красивой ошибки синтаксиса
 void parse_error(int line, const char* msg, const char* detail) {
     printf("\n[ОШИБКА СИНТАКСИСА] Строка %d: %s '%s'\n", line, msg, detail ? detail : "");
     exit(1);
@@ -29,7 +27,6 @@ void add_child(ASTNode* parent, ASTNode* child) {
     parent->children[parent->children_count - 1] = child;
 }
 
-// Предопределяем функции для математики
 ASTNode* parse_expr();
 
 ASTNode* parse_factor() {
@@ -91,8 +88,19 @@ ASTNode* parse(const char* source) {
     ASTNode* program = create_node(AST_PROGRAM);
 
     while (current_token.type != TOKEN_EOF) {
-        // Объявление переменной (цел a)
-        if (current_token.type == TOKEN_TYPE_CEL) {
+        // 1. Игнорируем заголовок алгоритма (алг ИмяАлгоритма)
+        if (current_token.type == TOKEN_ALG) {
+            advance(); // съедаем слово 'алг'
+            if (current_token.type == TOKEN_IDENTIFIER) {
+                advance(); // съедаем ИМЯ алгоритма
+            }
+        }
+        // 2. Игнорируем слова 'нач' и 'кон'
+        else if (current_token.type == TOKEN_NACH || current_token.type == TOKEN_KON) {
+            advance();
+        }
+        // 3. Объявление переменной (цел a)
+        else if (current_token.type == TOKEN_TYPE_CEL) {
             advance();
             if (current_token.type != TOKEN_IDENTIFIER) parse_error(current_token.line, "Ожидалось имя переменной после", "цел");
             ASTNode* decl = create_node(AST_VAR_DECL);
@@ -100,7 +108,7 @@ ASTNode* parse(const char* source) {
             add_child(program, decl);
             advance();
         } 
-        // Присваивание (a := 5)
+        // 4. Присваивание (a := 5)
         else if (current_token.type == TOKEN_IDENTIFIER) {
             ASTNode* assign = create_node(AST_ASSIGN);
             assign->string_value = current_token.value;
@@ -110,7 +118,7 @@ ASTNode* parse(const char* source) {
             assign->left = parse_expr();
             add_child(program, assign);
         }
-        // Вывод (вывод "Текст", a)
+        // 5. Вывод (вывод "Текст", a)
         else if (current_token.type == TOKEN_VYVOD) {
             ASTNode* print_node = create_node(AST_PRINT);
             advance();
@@ -121,7 +129,9 @@ ASTNode* parse(const char* source) {
             }
             add_child(program, print_node);
         }
-        else { advance(); } // Пропускаем алг, нач, кон
+        else { 
+            parse_error(current_token.line, "Неизвестная команда или ошибка синтаксиса", current_token.value);
+        }
     }
     return program;
 }
