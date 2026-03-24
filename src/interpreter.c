@@ -38,6 +38,45 @@ void runtime_error(int line, const char* msg, const char* detail) {
     printf("\n[ОШИБКА] Строка %d: %s '%s'\n", line, msg, detail ? detail : ""); exit(1);
 }
 
+// ==== ГЛОБАЛЬНЫЕ НАСТРОЙКИ ИНЕТА =====
+static char GLOBAL_USER_AGENT[512] = "Kumir2/1.0";
+static char GLOBAL_HEADERS[4096] = "";
+static char GLOBAL_COOKIES[4096] = "";
+
+// ==== API ДЛЯ ЯЗЫКА (User-Agent, заголовки, cookies) =====
+KValue native_set_useragent(KValue* args, int count) {
+    if (args[0].type == VAL_STR) {
+        strncpy(GLOBAL_USER_AGENT, args[0].s, sizeof(GLOBAL_USER_AGENT)-1);
+    }
+    return make_int(0);
+}
+
+KValue native_add_header(KValue* args, int count) {
+    if (args[0].type == VAL_STR) {
+        strcat(GLOBAL_HEADERS, args[0].s);
+        strcat(GLOBAL_HEADERS, "\r\n");
+    }
+    return make_int(0);
+}
+
+KValue native_clear_headers(KValue* args, int count) {
+    GLOBAL_HEADERS[0] = '\0';
+    return make_int(0);
+}
+
+KValue native_add_cookie(KValue* args, int count) {
+    if (args[0].type == VAL_STR) {
+        if (strlen(GLOBAL_COOKIES) > 0) strcat(GLOBAL_COOKIES, "; ");
+        strcat(GLOBAL_COOKIES, args[0].s);
+    }
+    return make_int(0);
+}
+
+KValue native_clear_cookies(KValue* args, int count) {
+    GLOBAL_COOKIES[0] = '\0';
+    return make_int(0);
+}
+
 // ==== ВВОД ====
 KValue native_vvod(KValue* args, int count) {
 #ifdef _WIN32
@@ -301,7 +340,7 @@ KValue native_sock_close(KValue* args, int count) {
     if (args[0].type == VAL_INT) closesocket(args[0].i); return make_int(0);
 }
 
-// ==== HTTPS (только Windows, через WinINet — не нужны внешние библиотеки!) ====
+// ==== HTTPS (Windows, через WinINet) ====
 #ifdef _WIN32
 // Внутренний хелпер: выполнить GET или POST и вернуть тело ответа
 static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
@@ -309,17 +348,21 @@ static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
     wchar_t* wurl = malloc(wlen * sizeof(wchar_t));
     MultiByteToWideChar(CP_UTF8, 0, url_utf8, -1, wurl, wlen);
 
-    HINTERNET hInternet = InternetOpen(L"Kumir2/1.0", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    // User‑Agent из глобальной переменной
+    int wlenUA = MultiByteToWideChar(CP_UTF8, 0, GLOBAL_USER_AGENT, -1, NULL, 0);
+    wchar_t* wua = malloc(wlenUA * sizeof(wchar_t));
+    MultiByteToWideChar(CP_UTF8, 0, GLOBAL_USER_AGENT, -1, wua, wlenUA);
+
+    HINTERNET hInternet = InternetOpen(wua, INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    free(wua);
     if (!hInternet) { free(wurl); return strdup(""); }
 
     DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE;
-    // Если https — добавляем флаг безопасности
     if (strncmp(url_utf8, "https://", 8) == 0) flags |= INTERNET_FLAG_SECURE;
 
     HINTERNET hUrl;
     if (post_data_utf8 && strlen(post_data_utf8) > 0) {
-        // POST-запрос (через InternetOpenUrl нельзя, используем более низкий уровень)
-        // Разбираем URL вручную
+        // POST-запрос
         URL_COMPONENTSW uc; memset(&uc, 0, sizeof(uc));
         uc.dwStructSize = sizeof(uc);
         wchar_t whost[512]; wchar_t wpath[2048];
@@ -332,12 +375,38 @@ static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
         DWORD req_flags = (uc.nScheme == INTERNET_SCHEME_HTTPS) ?
             (INTERNET_FLAG_SECURE | INTERNET_FLAG_RELOAD) : INTERNET_FLAG_RELOAD;
         HINTERNET hReq = HttpOpenRequestW(hConn, L"POST", wpath, NULL, NULL, NULL, req_flags, 0);
-        const char* ct = "Content-Type: application/x-www-form-urlencoded\r\n";
-        HttpSendRequestA(hReq, ct, strlen(ct), (void*)post_data_utf8, strlen(post_data_utf8));
+
+        // Формируем полные заголовки
+        char full_headers[8192];
+        snprintf(full_headers, sizeof(full_headers),
+            "Content-Type: application/x-www-form-urlencoded\r\n"
+            "%s"
+            "%s%s",
+            GLOBAL_HEADERS,
+            strlen(GLOBAL_COOKIES) ? "Cookie: " : "",
+            strlen(GLOBAL_COOKIES) ? GLOBAL_COOKIES : ""
+        );
+
+        HttpSendRequestA(hReq, full_headers, strlen(full_headers),
+            (void*)post_data_utf8, strlen(post_data_utf8));
         hUrl = hReq;
-        // hConn утечка, но для простоты окей
+        // hConn не закрываем – будет закрыт вместе с hReq? Упростим, утечка допустима для демо.
     } else {
-        hUrl = InternetOpenUrlW(hInternet, wurl, NULL, 0, flags, 0);
+        // GET-запрос
+        char headers[8192];
+        snprintf(headers, sizeof(headers),
+            "%s%s%s",
+            GLOBAL_HEADERS,
+            strlen(GLOBAL_COOKIES) ? "Cookie: " : "",
+            strlen(GLOBAL_COOKIES) ? GLOBAL_COOKIES : ""
+        );
+
+        int wlenH = MultiByteToWideChar(CP_UTF8, 0, headers, -1, NULL, 0);
+        wchar_t* wh = malloc(wlenH * sizeof(wchar_t));
+        MultiByteToWideChar(CP_UTF8, 0, headers, -1, wh, wlenH);
+
+        hUrl = InternetOpenUrlW(hInternet, wurl, wh, wcslen(wh), flags, 0);
+        free(wh);
     }
     free(wurl);
 
@@ -361,7 +430,6 @@ KValue native_https_get(KValue* args, int count) {
 }
 
 KValue native_https_post(KValue* args, int count) {
-    // args[0] = URL, args[1] = тело (form-encoded или json)
     if (args[0].type != VAL_STR) return make_str("");
     const char* body = (count > 1 && args[1].type == VAL_STR) ? args[1].s : "";
     char* r = wininet_request(args[0].s, body);
@@ -518,6 +586,13 @@ void execute(ASTNode* node) {
             // HTTPS (WinINet)
             register_native("https_гет",          native_https_get);
             register_native("https_пост",         native_https_post);
+            // ===== НОВЫЕ ФУНКЦИИ ДЛЯ УПРАВЛЕНИЯ ЗАГОЛОВКАМИ =====
+            register_native("инет_юзерагент",     native_set_useragent);
+            register_native("инет_заголовок",     native_add_header);
+            register_native("инет_очистить_заголовки", native_clear_headers);
+            register_native("инет_куки",          native_add_cookie);
+            register_native("инет_очистить_куки", native_clear_cookies);
+            // ==================================================
 
             for (int i=0; i<node->children_count; i++) {
                 if (node->children[i]->type == AST_FUNC_DEF) {
