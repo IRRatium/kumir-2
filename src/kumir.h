@@ -9,25 +9,16 @@
 // ЛЕКСЕР: Типы токенов
 // ========================
 typedef enum {
-    TOKEN_ALG,          // алг
-    TOKEN_NACH,         // нач
-    TOKEN_KON,          // кон
-    TOKEN_VYVOD,        // вывод
-    TOKEN_TYPE_CEL,     // цел
-    TOKEN_ZNACH,        // знач (возврат значения из алгоритма)
-    TOKEN_IDENTIFIER,   // имя переменной или алгоритма
-    TOKEN_NUMBER,       // число (5, 100)
-    TOKEN_STRING,       // "строка"
-    TOKEN_ASSIGN,       // :=
-    TOKEN_PLUS,         // +
-    TOKEN_MINUS,        // -
-    TOKEN_MUL,          // *
-    TOKEN_DIV,          // /
-    TOKEN_LPAREN,       // (
-    TOKEN_RPAREN,       // )
-    TOKEN_COMMA,        // ,
-    TOKEN_EOF,
-    TOKEN_UNKNOWN
+    TOKEN_ALG, TOKEN_NACH, TOKEN_KON, TOKEN_VYVOD, TOKEN_ZNACH, TOKEN_ISPOLZOVAT,
+    TOKEN_TYPE_CEL, TOKEN_TYPE_LIT, TOKEN_TYPE_LOG,
+    TOKEN_ESLI, TOKEN_TO, TOKEN_INACHE, TOKEN_VSE,
+    TOKEN_NC, TOKEN_POKA, TOKEN_RAZ, TOKEN_KC,
+    TOKEN_DA, TOKEN_NET, TOKEN_AND, TOKEN_OR, TOKEN_NOT,
+    TOKEN_IDENTIFIER, TOKEN_NUMBER, TOKEN_STRING,
+    TOKEN_ASSIGN, // :=
+    TOKEN_PLUS, TOKEN_MINUS, TOKEN_MUL, TOKEN_DIV,
+    TOKEN_EQ, TOKEN_NEQ, TOKEN_LT, TOKEN_GT, TOKEN_LE, TOKEN_GE, // = <> < > <= >=
+    TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_COMMA, TOKEN_EOF, TOKEN_UNKNOWN
 } KTokenType;
 
 typedef struct {
@@ -37,34 +28,25 @@ typedef struct {
 } Token;
 
 // ========================
+// ЗНАЧЕНИЯ ПЕРЕМЕННЫХ
+// ========================
+typedef enum { VAL_INT, VAL_STR } ValType;
+
+typedef struct {
+    ValType type;
+    int i;
+    char* s;
+} KValue;
+
+// ========================
 // ПАРСЕР: Узлы AST
 // ========================
 typedef enum {
-    AST_PROGRAM,    // Корень: список алгоритмов
-    AST_FUNC_DEF,   // Определение алгоритма: алг [цел] Имя([параметры]) нач...кон
-    AST_FUNC_CALL,  // Вызов алгоритма: Имя(арг1, арг2)
-    AST_PARAM,      // Параметр алгоритма: цел a
-    AST_BODY,       // Тело алгоритма (нач...кон)
-    AST_PRINT,      // вывод
-    AST_VAR_DECL,   // Объявление переменной: цел a
-    AST_ASSIGN,     // Присваивание: a := выражение
-    AST_ZNACH,      // Возврат значения: знач := выражение
-    AST_BINOP,      // Бинарная операция: a + b
-    AST_VAR,        // Переменная
-    AST_NUM,        // Число
-    AST_STR         // Строка
+    AST_PROGRAM, AST_FUNC_DEF, AST_FUNC_CALL, AST_PARAM, AST_BODY,
+    AST_PRINT, AST_VAR_DECL, AST_ASSIGN, AST_ZNACH,
+    AST_BINOP, AST_VAR, AST_NUM, AST_STR,
+    AST_IF, AST_WHILE, AST_REPEAT
 } ASTNodeType;
-
-// Схема хранения данных в узлах:
-//
-//  AST_FUNC_DEF:  string_value=имя, int_value=1(цел)/0(void),
-//                 children[]=AST_PARAM, left=AST_BODY
-//  AST_FUNC_CALL: string_value=имя, children[]=аргументы
-//  AST_PARAM:     string_value=имя, int_value=1(цел)
-//  AST_BODY:      children[]=операторы
-//  AST_ASSIGN:    string_value=имя_переменной, left=выражение
-//  AST_ZNACH:     left=выражение
-//  AST_BINOP:     string_value=оператор(+,-,*,/), left, right
 
 typedef struct ASTNode {
     ASTNodeType type;
@@ -78,12 +60,16 @@ typedef struct ASTNode {
 } ASTNode;
 
 // ========================
-// ПРОТОТИПЫ ФУНКЦИЙ
+// ПРОТОТИПЫ
 // ========================
+char* read_file_content(const char* filename); // теперь глобально доступен
 Token get_next_token(const char** source, int* current_line);
 ASTNode* parse(const char* source);
 void execute(ASTNode* node);
 void parse_error(int line, const char* msg, const char* detail);
 void runtime_error(int line, const char* msg, const char* detail);
+
+KValue make_int(int v);
+KValue make_str(const char* v);
 
 #endif
