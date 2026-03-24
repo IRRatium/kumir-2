@@ -1,6 +1,16 @@
 #include "kumir.h"
 #include <ctype.h>
 
+// Наша собственная функция копирования строки (замена системной strndup)
+char* kumir_strndup(const char* s, size_t n) {
+    char* p = malloc(n + 1);
+    if (p) {
+        strncpy(p, s, n);
+        p[n] = '\0';
+    }
+    return p;
+}
+
 // Пропуск пробелов и переносов
 void skip_whitespace(const char** source) {
     while (**source == ' ' || **source == '\t' || **source == '\n' || **source == '\r') {
@@ -25,7 +35,7 @@ Token get_next_token(const char** source) {
         
         int length = *source - start;
         token.type = TOKEN_STRING;
-        token.value = strndup(start, length);
+        token.value = kumir_strndup(start, length); // Используем нашу функцию
         
         if (**source == '"') (*source)++; // пропускаем вторую кавычку
         return token;
@@ -40,7 +50,7 @@ Token get_next_token(const char** source) {
 
     int length = *source - start;
     if (length > 0) {
-        char* word = strndup(start, length);
+        char* word = kumir_strndup(start, length); // Используем нашу функцию
         if (strcmp(word, "алг") == 0) token.type = TOKEN_ALG;
         else if (strcmp(word, "нач") == 0) token.type = TOKEN_NACH;
         else if (strcmp(word, "кон") == 0) token.type = TOKEN_KON;
