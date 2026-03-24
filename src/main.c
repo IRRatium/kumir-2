@@ -4,11 +4,12 @@
 #include <windows.h>
 #endif
 
-char* read_file(const char* filename) {
+// Глобальная функция для библиотек
+char* read_file_content(const char* filename) {
     FILE* file = fopen(filename, "rb");
     if (!file) {
-        printf("Ошибка: не удалось открыть файл %s\n", filename);
-        exit(1);
+        // Не пишем ошибку сразу (может файл искался по-другому)
+        return NULL; 
     }
     fseek(file, 0, SEEK_END);
     long length = ftell(file);
@@ -22,7 +23,6 @@ char* read_file(const char* filename) {
 }
 
 int main(int argc, char** argv) {
-    // Поддержка русского языка в консоли Windows
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif
@@ -34,15 +34,17 @@ int main(int argc, char** argv) {
 
     const char* filename = argv[1];
     
-    // Проверка расширения .kum
     if (!strstr(filename, ".kum")) {
         printf("Ошибка: Файл должен иметь расширение .kum\n");
         return 1;
     }
 
-    char* source = read_file(filename);
+    char* source = read_file_content(filename);
+    if (!source) {
+        printf("Ошибка: не удалось прочитать файл %s\n", filename);
+        return 1;
+    }
     
-    // Запускаем интерпретатор
     ASTNode* ast = parse(source);
     execute(ast);
 
