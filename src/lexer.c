@@ -7,16 +7,28 @@ char* kumir_strndup(const char* s, size_t n) {
     return p;
 }
 
-void skip_whitespace(const char** source, int* line) {
-    while (**source == ' ' || **source == '\t' || **source == '\n' || **source == '\r') {
-        if (**source == '\n') (*line)++; // Считаем строки!
-        (*source)++;
+// ТЕПЕРЬ МЫ ПРОПУСКАЕМ И ПРОБЕЛЫ, И КОММЕНТАРИИ (через символ |)
+void skip_whitespace_and_comments(const char** source, int* line) {
+    while (**source != '\0') {
+        if (**source == ' ' || **source == '\t' || **source == '\r') {
+            (*source)++;
+        } else if (**source == '\n') {
+            (*line)++;
+            (*source)++;
+        } else if (**source == '|') {
+            // Если встретили '|', идем вперед, пока не найдем перенос строки
+            while (**source != '\n' && **source != '\0') {
+                (*source)++;
+            }
+        } else {
+            break;
+        }
     }
 }
 
 Token get_next_token(const char** source, int* line) {
     Token token = {TOKEN_UNKNOWN, NULL, *line};
-    skip_whitespace(source, line);
+    skip_whitespace_and_comments(source, line);
     token.line = *line;
 
     if (**source == '\0') { token.type = TOKEN_EOF; return token; }
@@ -38,9 +50,9 @@ Token get_next_token(const char** source, int* line) {
     }
 
     // Числа
-    if (isdigit(**source)) {
+    if (isdigit((unsigned char)**source)) {
         const char* start = *source;
-        while (isdigit(**source)) (*source)++;
+        while (isdigit((unsigned char)**source)) (*source)++;
         token.type = TOKEN_NUMBER;
         token.value = kumir_strndup(start, *source - start);
         return token;
