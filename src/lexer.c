@@ -7,7 +7,6 @@ char* kumir_strndup(const char* s, size_t n) {
     return p;
 }
 
-// Пропускаем пробелы и комментарии (комментарий начинается с '|')
 void skip_whitespace_and_comments(const char** source, int* line) {
     while (**source != '\0') {
         if (**source == ' ' || **source == '\t' || **source == '\r') {
@@ -30,7 +29,16 @@ Token get_next_token(const char** source, int* line) {
 
     if (**source == '\0') { token.type = TOKEN_EOF; return token; }
 
-    // Односимвольные токены
+    // Двухсимвольные операторы
+    if (strncmp(*source, ":=", 2) == 0) { *source += 2; token.type = TOKEN_ASSIGN; return token; }
+    if (strncmp(*source, "<>", 2) == 0) { *source += 2; token.type = TOKEN_NEQ; return token; }
+    if (strncmp(*source, "<=", 2) == 0) { *source += 2; token.type = TOKEN_LE; return token; }
+    if (strncmp(*source, ">=", 2) == 0) { *source += 2; token.type = TOKEN_GE; return token; }
+
+    // Односимвольные операторы
+    if (**source == '=') { (*source)++; token.type = TOKEN_EQ; return token; }
+    if (**source == '<') { (*source)++; token.type = TOKEN_LT; return token; }
+    if (**source == '>') { (*source)++; token.type = TOKEN_GT; return token; }
     if (**source == '+') { (*source)++; token.type = TOKEN_PLUS;   return token; }
     if (**source == '-') { (*source)++; token.type = TOKEN_MINUS;  return token; }
     if (**source == '*') { (*source)++; token.type = TOKEN_MUL;    return token; }
@@ -39,14 +47,6 @@ Token get_next_token(const char** source, int* line) {
     if (**source == ')') { (*source)++; token.type = TOKEN_RPAREN; return token; }
     if (**source == ',') { (*source)++; token.type = TOKEN_COMMA;  return token; }
 
-    // Оператор присваивания :=
-    if (**source == ':' && *(*source + 1) == '=') {
-        *source += 2;
-        token.type = TOKEN_ASSIGN;
-        return token;
-    }
-
-    // Числа
     if (isdigit((unsigned char)**source)) {
         const char* start = *source;
         while (isdigit((unsigned char)**source)) (*source)++;
@@ -55,7 +55,6 @@ Token get_next_token(const char** source, int* line) {
         return token;
     }
 
-    // Строки в кавычках
     if (**source == '"') {
         (*source)++;
         const char* start = *source;
@@ -69,7 +68,6 @@ Token get_next_token(const char** source, int* line) {
         return token;
     }
 
-    // Ключевые слова и идентификаторы (включая кириллицу)
     const char* start = *source;
     while (isalnum((unsigned char)**source) || (unsigned char)**source > 127 || **source == '_') {
         (*source)++;
@@ -78,15 +76,29 @@ Token get_next_token(const char** source, int* line) {
     int length = *source - start;
     if (length > 0) {
         char* word = kumir_strndup(start, length);
-
         if      (strcmp(word, "алг")   == 0) token.type = TOKEN_ALG;
         else if (strcmp(word, "нач")   == 0) token.type = TOKEN_NACH;
         else if (strcmp(word, "кон")   == 0) token.type = TOKEN_KON;
         else if (strcmp(word, "вывод") == 0) token.type = TOKEN_VYVOD;
-        else if (strcmp(word, "цел")   == 0) token.type = TOKEN_TYPE_CEL;
         else if (strcmp(word, "знач")  == 0) token.type = TOKEN_ZNACH;
+        else if (strcmp(word, "цел")   == 0) token.type = TOKEN_TYPE_CEL;
+        else if (strcmp(word, "лит")   == 0) token.type = TOKEN_TYPE_LIT;
+        else if (strcmp(word, "лог")   == 0) token.type = TOKEN_TYPE_LOG;
+        else if (strcmp(word, "если")  == 0) token.type = TOKEN_ESLI;
+        else if (strcmp(word, "то")    == 0) token.type = TOKEN_TO;
+        else if (strcmp(word, "иначе") == 0) token.type = TOKEN_INACHE;
+        else if (strcmp(word, "все")   == 0) token.type = TOKEN_VSE;
+        else if (strcmp(word, "нц")    == 0) token.type = TOKEN_NC;
+        else if (strcmp(word, "пока")  == 0) token.type = TOKEN_POKA;
+        else if (strcmp(word, "раз")   == 0) token.type = TOKEN_RAZ;
+        else if (strcmp(word, "кц")    == 0) token.type = TOKEN_KC;
+        else if (strcmp(word, "использовать") == 0) token.type = TOKEN_ISPOLZOVAT;
+        else if (strcmp(word, "да")    == 0) token.type = TOKEN_DA;
+        else if (strcmp(word, "нет")   == 0) token.type = TOKEN_NET;
+        else if (strcmp(word, "и")     == 0) token.type = TOKEN_AND;
+        else if (strcmp(word, "или")   == 0) token.type = TOKEN_OR;
+        else if (strcmp(word, "не")    == 0) token.type = TOKEN_NOT;
         else                                 token.type = TOKEN_IDENTIFIER;
-
         token.value = word;
         return token;
     }
