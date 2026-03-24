@@ -2,8 +2,8 @@
 #include <math.h>
 
 #ifdef _WIN32
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #include <ws2tcpip.h>
 #include <wininet.h>
 #else
@@ -349,12 +349,7 @@ static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
     MultiByteToWideChar(CP_UTF8, 0, url_utf8, -1, wurl, wlen);
 
     // User‑Agent из глобальной переменной
-    int wlenUA = MultiByteToWideChar(CP_UTF8, 0, GLOBAL_USER_AGENT, -1, NULL, 0);
-    wchar_t* wua = malloc(wlenUA * sizeof(wchar_t));
-    MultiByteToWideChar(CP_UTF8, 0, GLOBAL_USER_AGENT, -1, wua, wlenUA);
-
-    HINTERNET hInternet = InternetOpen(wua, INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
-    free(wua);
+    HINTERNET hInternet = InternetOpenA(GLOBAL_USER_AGENT, INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
     if (!hInternet) { free(wurl); return strdup(""); }
 
     DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE;
