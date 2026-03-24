@@ -1,0 +1,24 @@
+name: Build Kumir 2 (Windows EXE)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Compile C source code
+      run: |
+        gcc -O3 src/main.c src/lexer.c src/parser.c src/interpreter.c -o kumir2.exe
+
+    - name: Upload EXE artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: kumir2-windows
+        path: kumir2.exe
