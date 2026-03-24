@@ -6,38 +6,49 @@
 #include <string.h>
 
 // --- ЛЕКСЕР (Токены) ---
-// Переименовали TokenType в KTokenType, чтобы избежать конфликта с windows.h
 typedef enum {
-    TOKEN_ALG,      // алг
-    TOKEN_NACH,     // нач
-    TOKEN_KON,      // кон
-    TOKEN_VYVOD,    // вывод
-    TOKEN_STRING,   // "текст"
-    TOKEN_EOF,      // Конец файла
-    TOKEN_UNKNOWN
+    TOKEN_ALG, TOKEN_NACH, TOKEN_KON, TOKEN_VYVOD,
+    TOKEN_TYPE_CEL,         // цел
+    TOKEN_IDENTIFIER,       // Имя переменной (a, b, сумма)
+    TOKEN_NUMBER,           // Число (5, 100)
+    TOKEN_STRING,           // "текст"
+    TOKEN_ASSIGN,           // :=
+    TOKEN_PLUS, TOKEN_MINUS, TOKEN_MUL, TOKEN_DIV, // + - * /
+    TOKEN_LPAREN, TOKEN_RPAREN, // ( )
+    TOKEN_COMMA,            // ,
+    TOKEN_EOF, TOKEN_UNKNOWN
 } KTokenType;
 
 typedef struct {
     KTokenType type;
     char* value;
+    int line; // Храним номер строки для ошибок!
 } Token;
 
-// --- ПАРСЕР (Абстрактное синтаксическое дерево - AST) ---
+// --- ПАРСЕР (Узлы AST) ---
 typedef enum {
-    AST_PROGRAM,
-    AST_PRINT
+    AST_PROGRAM, AST_PRINT, AST_VAR_DECL, AST_ASSIGN,
+    AST_BINOP, AST_VAR, AST_NUM, AST_STR
 } ASTNodeType;
 
 typedef struct ASTNode {
     ASTNodeType type;
     char* string_value;
+    int int_value;
+    int line; // Строка для ошибок выполнения
+    struct ASTNode* left;   // Для математики (левая часть)
+    struct ASTNode* right;  // Для математики (правая часть)
     struct ASTNode** children;
     int children_count;
 } ASTNode;
 
 // Функции
-Token get_next_token(const char** source);
+Token get_next_token(const char** source, int* current_line);
 ASTNode* parse(const char* source);
 void execute(ASTNode* node);
+
+// Функции ошибок
+void parse_error(int line, const char* msg, const char* detail);
+void runtime_error(int line, const char* msg, const char* detail);
 
 #endif
