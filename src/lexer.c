@@ -1,66 +1,85 @@
 #include "kumir.h"
 #include <ctype.h>
 
-// Наша собственная функция копирования строки (замена системной strndup)
 char* kumir_strndup(const char* s, size_t n) {
     char* p = malloc(n + 1);
-    if (p) {
-        strncpy(p, s, n);
-        p[n] = '\0';
-    }
+    if (p) { strncpy(p, s, n); p[n] = '\0'; }
     return p;
 }
 
-// Пропуск пробелов и переносов
-void skip_whitespace(const char** source) {
+void skip_whitespace(const char** source, int* line) {
     while (**source == ' ' || **source == '\t' || **source == '\n' || **source == '\r') {
+        if (**source == '\n') (*line)++; // Считаем строки!
         (*source)++;
     }
 }
 
-Token get_next_token(const char** source) {
-    Token token = {TOKEN_UNKNOWN, NULL};
-    skip_whitespace(source);
+Token get_next_token(const char** source, int* line) {
+    Token token = {TOKEN_UNKNOWN, NULL, *line};
+    skip_whitespace(source, line);
+    token.line = *line;
 
-    if (**source == '\0') {
-        token.type = TOKEN_EOF;
+    if (**source == '\0') { token.type = TOKEN_EOF; return token; }
+
+    // Односимвольные токены
+    if (**source == '+') { (*source)++; token.type = TOKEN_PLUS; return token; }
+    if (**source == '-') { (*source)++; token.type = TOKEN_MINUS; return token; }
+    if (**source == '*') { (*source)++; token.type = TOKEN_MUL; return token; }
+    if (**source == '/') { (*source)++; token.type = TOKEN_DIV; return token; }
+    if (**source == '(') { (*source)++; token.type = TOKEN_LPAREN; return token; }
+    if (**source == ')') { (*source)++; token.type = TOKEN_RPAREN; return token; }
+    if (**source == ',') { (*source)++; token.type = TOKEN_COMMA; return token; }
+
+    // Оператор присваивания :=
+    if (**source == ':' && *(*source + 1) == '=') {
+        *source += 2;
+        token.type = TOKEN_ASSIGN;
         return token;
     }
 
-    // Обработка строк "..."
-    if (**source == '"') {
-        (*source)++; // пропускаем первую кавычку
+    // Числа
+    if (isdigit(**source)) {
         const char* start = *source;
-        while (**source != '"' && **source != '\0') (*source)++;
-        
-        int length = *source - start;
-        token.type = TOKEN_STRING;
-        token.value = kumir_strndup(start, length); // Используем нашу функцию
-        
-        if (**source == '"') (*source)++; // пропускаем вторую кавычку
+        while (isdigit(**source)) (*source)++;
+        token.type = TOKEN_NUMBER;
+        token.value = kumir_strndup(start, *source - start);
         return token;
     }
 
-    // Обработка ключевых слов (алг, нач, кон, вывод)
+    // Строки
+    if (**source == '"') {
+        (*source)++;
+        const char* start = *source;
+        while (**source != '"' && **source != '\0') {
+            if (**source == '\n') (*line)++;
+            (*source)++;
+        }
+        token.type = TOKEN_STRING;
+        token.value = kumir_strndup(start, *source - start);
+        if (**source == '"') (*source)++;
+        return token;
+    }
+
+    // Ключевые слова и переменные
     const char* start = *source;
-    // Пока идут русские буквы в UTF-8 (байты > 127) или английские
-    while (isalnum((unsigned char)**source) || (unsigned char)**source > 127) {
+    while (isalnum((unsigned char)**source) || (unsigned char)**source > 127 || **source == '_') {
         (*source)++;
     }
 
     int length = *source - start;
     if (length > 0) {
-        char* word = kumir_strndup(start, length); // Используем нашу функцию
+        char* word = kumir_strndup(start, length);
         if (strcmp(word, "алг") == 0) token.type = TOKEN_ALG;
         else if (strcmp(word, "нач") == 0) token.type = TOKEN_NACH;
         else if (strcmp(word, "кон") == 0) token.type = TOKEN_KON;
         else if (strcmp(word, "вывод") == 0) token.type = TOKEN_VYVOD;
-        else token.type = TOKEN_UNKNOWN;
+        else if (strcmp(word, "цел") == 0) token.type = TOKEN_TYPE_CEL;
+        else { token.type = TOKEN_IDENTIFIER; token.value = word; return token; }
         
         token.value = word;
         return token;
     }
 
-    (*source)++; // Если непонятный символ
+    (*source)++;
     return token;
 }
