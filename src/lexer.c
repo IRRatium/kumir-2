@@ -7,7 +7,7 @@ char* kumir_strndup(const char* s, size_t n) {
     return p;
 }
 
-// ТЕПЕРЬ МЫ ПРОПУСКАЕМ И ПРОБЕЛЫ, И КОММЕНТАРИИ (через символ |)
+// Пропускаем пробелы и комментарии (комментарий начинается с '|')
 void skip_whitespace_and_comments(const char** source, int* line) {
     while (**source != '\0') {
         if (**source == ' ' || **source == '\t' || **source == '\r') {
@@ -16,10 +16,7 @@ void skip_whitespace_and_comments(const char** source, int* line) {
             (*line)++;
             (*source)++;
         } else if (**source == '|') {
-            // Если встретили '|', идем вперед, пока не найдем перенос строки
-            while (**source != '\n' && **source != '\0') {
-                (*source)++;
-            }
+            while (**source != '\n' && **source != '\0') (*source)++;
         } else {
             break;
         }
@@ -34,13 +31,13 @@ Token get_next_token(const char** source, int* line) {
     if (**source == '\0') { token.type = TOKEN_EOF; return token; }
 
     // Односимвольные токены
-    if (**source == '+') { (*source)++; token.type = TOKEN_PLUS; return token; }
-    if (**source == '-') { (*source)++; token.type = TOKEN_MINUS; return token; }
-    if (**source == '*') { (*source)++; token.type = TOKEN_MUL; return token; }
-    if (**source == '/') { (*source)++; token.type = TOKEN_DIV; return token; }
+    if (**source == '+') { (*source)++; token.type = TOKEN_PLUS;   return token; }
+    if (**source == '-') { (*source)++; token.type = TOKEN_MINUS;  return token; }
+    if (**source == '*') { (*source)++; token.type = TOKEN_MUL;    return token; }
+    if (**source == '/') { (*source)++; token.type = TOKEN_DIV;    return token; }
     if (**source == '(') { (*source)++; token.type = TOKEN_LPAREN; return token; }
     if (**source == ')') { (*source)++; token.type = TOKEN_RPAREN; return token; }
-    if (**source == ',') { (*source)++; token.type = TOKEN_COMMA; return token; }
+    if (**source == ',') { (*source)++; token.type = TOKEN_COMMA;  return token; }
 
     // Оператор присваивания :=
     if (**source == ':' && *(*source + 1) == '=') {
@@ -58,7 +55,7 @@ Token get_next_token(const char** source, int* line) {
         return token;
     }
 
-    // Строки
+    // Строки в кавычках
     if (**source == '"') {
         (*source)++;
         const char* start = *source;
@@ -72,7 +69,7 @@ Token get_next_token(const char** source, int* line) {
         return token;
     }
 
-    // Ключевые слова и переменные
+    // Ключевые слова и идентификаторы (включая кириллицу)
     const char* start = *source;
     while (isalnum((unsigned char)**source) || (unsigned char)**source > 127 || **source == '_') {
         (*source)++;
@@ -81,13 +78,15 @@ Token get_next_token(const char** source, int* line) {
     int length = *source - start;
     if (length > 0) {
         char* word = kumir_strndup(start, length);
-        if (strcmp(word, "алг") == 0) token.type = TOKEN_ALG;
-        else if (strcmp(word, "нач") == 0) token.type = TOKEN_NACH;
-        else if (strcmp(word, "кон") == 0) token.type = TOKEN_KON;
+
+        if      (strcmp(word, "алг")   == 0) token.type = TOKEN_ALG;
+        else if (strcmp(word, "нач")   == 0) token.type = TOKEN_NACH;
+        else if (strcmp(word, "кон")   == 0) token.type = TOKEN_KON;
         else if (strcmp(word, "вывод") == 0) token.type = TOKEN_VYVOD;
-        else if (strcmp(word, "цел") == 0) token.type = TOKEN_TYPE_CEL;
-        else { token.type = TOKEN_IDENTIFIER; token.value = word; return token; }
-        
+        else if (strcmp(word, "цел")   == 0) token.type = TOKEN_TYPE_CEL;
+        else if (strcmp(word, "знач")  == 0) token.type = TOKEN_ZNACH;
+        else                                 token.type = TOKEN_IDENTIFIER;
+
         token.value = word;
         return token;
     }
