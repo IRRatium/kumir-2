@@ -1,12 +1,10 @@
 #include "kumir.h"
 
-static int       current_line = 1;
-static Token     current_token;
+static int current_line = 1;
+static Token current_token;
 static const char* src_ptr;
 
-static void advance() {
-    current_token = get_next_token(&src_ptr, &current_line);
-}
+static void advance() { current_token = get_next_token(&src_ptr, &current_line); }
 
 void parse_error(int line, const char* msg, const char* detail) {
     printf("\n[ОШИБКА СИНТАКСИСА] Строка %d: %s '%s'\n", line, msg, detail ? detail : "");
@@ -15,92 +13,57 @@ void parse_error(int line, const char* msg, const char* detail) {
 
 static ASTNode* create_node(ASTNodeType type) {
     ASTNode* node = malloc(sizeof(ASTNode));
-    node->type          = type;
-    node->string_value  = NULL;
-    node->int_value     = 0;
-    node->left          = NULL;
-    node->right         = NULL;
-    node->children      = NULL;
-    node->children_count = 0;
-    node->line          = current_token.line;
+    node->type = type; node->string_value = NULL; node->int_value = 0;
+    node->left = NULL; node->right = NULL; node->children = NULL;
+    node->children_count = 0; node->line = current_token.line;
     return node;
 }
 
 static void add_child(ASTNode* parent, ASTNode* child) {
     parent->children_count++;
-    parent->children = realloc(parent->children,
-                               parent->children_count * sizeof(ASTNode*));
+    parent->children = realloc(parent->children, parent->children_count * sizeof(ASTNode*));
     parent->children[parent->children_count - 1] = child;
 }
 
-// ========================
-// Выражения
-// ========================
 static ASTNode* parse_expr();
+static ASTNode* parse_statement();
 
 static ASTNode* parse_factor() {
-    // Число: 42
     if (current_token.type == TOKEN_NUMBER) {
-        ASTNode* node = create_node(AST_NUM);
-        node->int_value = atoi(current_token.value);
-        advance();
-        return node;
+        ASTNode* node = create_node(AST_NUM); node->int_value = atoi(current_token.value);
+        advance(); return node;
     }
-
-    // Идентификатор: либо переменная, либо вызов алгоритма
+    if (current_token.type == TOKEN_DA || current_token.type == TOKEN_NET) {
+        ASTNode* node = create_node(AST_NUM); node->int_value = (current_token.type == TOKEN_DA) ? 1 : 0;
+        advance(); return node;
+    }
+    if (current_token.type == TOKEN_STRING) {
+        ASTNode* node = create_node(AST_STR); node->string_value = current_token.value;
+        advance(); return node;
+    }
     if (current_token.type == TOKEN_IDENTIFIER) {
-        char* name = current_token.value;
-        int   line = current_token.line;
-        advance();
-
+        char* name = current_token.value; int line = current_token.line; advance();
         if (current_token.type == TOKEN_LPAREN) {
-            // Вызов алгоритма в выражении: Имя(арг1, арг2)
-            ASTNode* call = create_node(AST_FUNC_CALL);
-            call->string_value = name;
-            call->line = line;
-            advance(); // consume '('
-
+            ASTNode* call = create_node(AST_FUNC_CALL); call->string_value = name; call->line = line;
+            advance();
             if (current_token.type != TOKEN_RPAREN) {
                 add_child(call, parse_expr());
-                while (current_token.type == TOKEN_COMMA) {
-                    advance();
-                    add_child(call, parse_expr());
-                }
+                while (current_token.type == TOKEN_COMMA) { advance(); add_child(call, parse_expr()); }
             }
-            if (current_token.type != TOKEN_RPAREN)
-                parse_error(current_token.line, "Ожидалась ')' в вызове алгоритма", name);
-            advance(); // consume ')'
-            return call;
+            if (current_token.type != TOKEN_RPAREN) parse_error(current_token.line, "Ожидалась ')'", name);
+            advance(); return call;
         } else {
-            // Просто переменная
-            ASTNode* node = create_node(AST_VAR);
-            node->string_value = name;
-            node->line = line;
+            ASTNode* node = create_node(AST_VAR); node->string_value = name; node->line = line;
             return node;
         }
     }
-
-    // Строка: "текст"
-    if (current_token.type == TOKEN_STRING) {
-        ASTNode* node = create_node(AST_STR);
-        node->string_value = current_token.value;
-        advance();
-        return node;
-    }
-
-    // Скобочное выражение: (a + b)
     if (current_token.type == TOKEN_LPAREN) {
-        advance();
-        ASTNode* node = parse_expr();
-        if (current_token.type != TOKEN_RPAREN)
-            parse_error(current_token.line, "Ожидалась закрывающая скобка", ")");
-        advance();
-        return node;
+        advance(); ASTNode* node = parse_expr();
+        if (current_token.type != TOKEN_RPAREN) parse_error(current_token.line, "Ожидалась ')'", "");
+        advance(); return node;
     }
-
-    parse_error(current_token.line, "Неожиданный символ",
-                current_token.value ? current_token.value : "конец файла");
-    return NULL; // не достигается
+    parse_error(current_token.line, "Неизвестный символ в выражении", current_token.value);
+    return NULL;
 }
 
 static ASTNode* parse_term() {
@@ -108,197 +71,184 @@ static ASTNode* parse_term() {
     while (current_token.type == TOKEN_MUL || current_token.type == TOKEN_DIV) {
         ASTNode* parent = create_node(AST_BINOP);
         parent->string_value = current_token.type == TOKEN_MUL ? "*" : "/";
-        parent->left = node;
-        advance();
-        parent->right = parse_factor();
+        parent->left = node; advance(); parent->right = parse_factor();
+        node = parent;
+    }
+    return node;
+}
+
+static ASTNode* parse_arith() {
+    ASTNode* node = parse_term();
+    while (current_token.type == TOKEN_PLUS || current_token.type == TOKEN_MINUS) {
+        ASTNode* parent = create_node(AST_BINOP);
+        parent->string_value = current_token.type == TOKEN_PLUS ? "+" : "-";
+        parent->left = node; advance(); parent->right = parse_term();
+        node = parent;
+    }
+    return node;
+}
+
+static ASTNode* parse_comp() {
+    ASTNode* node = parse_arith();
+    while (current_token.type >= TOKEN_EQ && current_token.type <= TOKEN_GE) {
+        ASTNode* parent = create_node(AST_BINOP);
+        if (current_token.type == TOKEN_EQ) parent->string_value = "=";
+        else if (current_token.type == TOKEN_NEQ) parent->string_value = "<>";
+        else if (current_token.type == TOKEN_LT) parent->string_value = "<";
+        else if (current_token.type == TOKEN_GT) parent->string_value = ">";
+        else if (current_token.type == TOKEN_LE) parent->string_value = "<=";
+        else if (current_token.type == TOKEN_GE) parent->string_value = ">=";
+        parent->left = node; advance(); parent->right = parse_arith();
         node = parent;
     }
     return node;
 }
 
 static ASTNode* parse_expr() {
-    ASTNode* node = parse_term();
-    while (current_token.type == TOKEN_PLUS || current_token.type == TOKEN_MINUS) {
+    ASTNode* node = parse_comp();
+    while (current_token.type == TOKEN_AND || current_token.type == TOKEN_OR) {
         ASTNode* parent = create_node(AST_BINOP);
-        parent->string_value = current_token.type == TOKEN_PLUS ? "+" : "-";
-        parent->left = node;
-        advance();
-        parent->right = parse_term();
+        parent->string_value = current_token.type == TOKEN_AND ? "и" : "или";
+        parent->left = node; advance(); parent->right = parse_comp();
         node = parent;
     }
     return node;
 }
 
-// ========================
-// Операторы внутри нач...кон
-// ========================
 static ASTNode* parse_statement() {
-    // Объявление переменной: цел имя
-    if (current_token.type == TOKEN_TYPE_CEL) {
+    if (current_token.type == TOKEN_TYPE_CEL || current_token.type == TOKEN_TYPE_LIT || current_token.type == TOKEN_TYPE_LOG) {
         advance();
-        if (current_token.type != TOKEN_IDENTIFIER)
-            parse_error(current_token.line, "Ожидалось имя переменной после 'цел'", "");
-        ASTNode* decl = create_node(AST_VAR_DECL);
-        decl->string_value = current_token.value;
-        advance();
+        if (current_token.type != TOKEN_IDENTIFIER) parse_error(current_token.line, "Ожидалось имя переменной", "");
+        ASTNode* decl = create_node(AST_VAR_DECL); decl->string_value = current_token.value; advance();
         return decl;
     }
-
-    // Возврат значения: знач := выражение
-    if (current_token.type == TOKEN_ZNACH) {
-        ASTNode* ret = create_node(AST_ZNACH);
-        advance(); // consume 'знач'
-        if (current_token.type != TOKEN_ASSIGN)
-            parse_error(current_token.line, "Ожидалось ':=' после 'знач'", "");
-        advance(); // consume ':='
-        ret->left = parse_expr();
-        return ret;
-    }
-
-    // Вывод: вывод выр, выр, ...
-    if (current_token.type == TOKEN_VYVOD) {
-        ASTNode* print_node = create_node(AST_PRINT);
+    if (current_token.type == TOKEN_ESLI) {
         advance();
-        add_child(print_node, parse_expr());
-        while (current_token.type == TOKEN_COMMA) {
-            advance();
-            add_child(print_node, parse_expr());
+        ASTNode* if_node = create_node(AST_IF);
+        add_child(if_node, parse_expr()); // [0] условие
+        if (current_token.type != TOKEN_TO) parse_error(current_token.line, "Ожидалось 'то'", "");
+        advance();
+        ASTNode* then_body = create_node(AST_BODY);
+        while (current_token.type != TOKEN_INACHE && current_token.type != TOKEN_VSE && current_token.type != TOKEN_EOF) {
+            add_child(then_body, parse_statement());
         }
+        add_child(if_node, then_body); // [1] тело ТО
+        if (current_token.type == TOKEN_INACHE) {
+            advance();
+            ASTNode* else_body = create_node(AST_BODY);
+            while (current_token.type != TOKEN_VSE && current_token.type != TOKEN_EOF) {
+                add_child(else_body, parse_statement());
+            }
+            add_child(if_node, else_body); // [2] тело ИНАЧЕ
+        }
+        if (current_token.type != TOKEN_VSE) parse_error(current_token.line, "Ожидалось 'все'", "");
+        advance(); return if_node;
+    }
+    if (current_token.type == TOKEN_NC) {
+        advance();
+        if (current_token.type == TOKEN_POKA) {
+            advance(); ASTNode* w_node = create_node(AST_WHILE);
+            add_child(w_node, parse_expr()); //[0] условие
+            ASTNode* body = create_node(AST_BODY);
+            while (current_token.type != TOKEN_KC && current_token.type != TOKEN_EOF) add_child(body, parse_statement());
+            if (current_token.type != TOKEN_KC) parse_error(current_token.line, "Ожидалось 'кц'", "");
+            advance(); add_child(w_node, body); return w_node;
+        } else {
+            ASTNode* rep_node = create_node(AST_REPEAT);
+            add_child(rep_node, parse_expr()); //[0] кол-во раз
+            if (current_token.type != TOKEN_RAZ) parse_error(current_token.line, "Ожидалось 'раз'", "");
+            advance(); ASTNode* body = create_node(AST_BODY);
+            while (current_token.type != TOKEN_KC && current_token.type != TOKEN_EOF) add_child(body, parse_statement());
+            if (current_token.type != TOKEN_KC) parse_error(current_token.line, "Ожидалось 'кц'", "");
+            advance(); add_child(rep_node, body); return rep_node;
+        }
+    }
+    if (current_token.type == TOKEN_ZNACH) {
+        ASTNode* ret = create_node(AST_ZNACH); advance();
+        if (current_token.type != TOKEN_ASSIGN) parse_error(current_token.line, "Ожидалось ':='", "");
+        advance(); ret->left = parse_expr(); return ret;
+    }
+    if (current_token.type == TOKEN_VYVOD) {
+        ASTNode* print_node = create_node(AST_PRINT); advance();
+        add_child(print_node, parse_expr());
+        while (current_token.type == TOKEN_COMMA) { advance(); add_child(print_node, parse_expr()); }
         return print_node;
     }
-
-    // Присваивание или вызов алгоритма-процедуры
     if (current_token.type == TOKEN_IDENTIFIER) {
-        char* name = current_token.value;
-        int   line = current_token.line;
-        advance();
-
-        // Присваивание: a := выражение
+        char* name = current_token.value; int line = current_token.line; advance();
         if (current_token.type == TOKEN_ASSIGN) {
-            ASTNode* assign = create_node(AST_ASSIGN);
-            assign->string_value = name;
-            assign->line = line;
-            advance(); // consume ':='
-            assign->left = parse_expr();
-            return assign;
+            ASTNode* assign = create_node(AST_ASSIGN); assign->string_value = name; assign->line = line;
+            advance(); assign->left = parse_expr(); return assign;
         }
-
-        // Вызов процедуры: МойАлг(a, b)  — результат игнорируется
         if (current_token.type == TOKEN_LPAREN) {
-            ASTNode* call = create_node(AST_FUNC_CALL);
-            call->string_value = name;
-            call->line = line;
-            advance(); // consume '('
+            ASTNode* call = create_node(AST_FUNC_CALL); call->string_value = name; call->line = line;
+            advance();
             if (current_token.type != TOKEN_RPAREN) {
                 add_child(call, parse_expr());
-                while (current_token.type == TOKEN_COMMA) {
-                    advance();
-                    add_child(call, parse_expr());
-                }
+                while (current_token.type == TOKEN_COMMA) { advance(); add_child(call, parse_expr()); }
             }
-            if (current_token.type != TOKEN_RPAREN)
-                parse_error(current_token.line, "Ожидалась ')' в вызове алгоритма", name);
-            advance();
-            return call;
+            if (current_token.type != TOKEN_RPAREN) parse_error(line, "Ожидалась ')'", "");
+            advance(); return call;
         }
-
-        parse_error(line, "Ожидалось ':=' или '(' после имени", name);
+        parse_error(line, "Ожидалось ':=' или '('", name);
     }
-
-    parse_error(current_token.line, "Неизвестная команда",
-                current_token.value ? current_token.value : "конец файла");
+    parse_error(current_token.line, "Неизвестная команда", current_token.value);
     return NULL;
 }
 
-// ========================
-// Определение алгоритма
-// ========================
-// Синтаксис:
-//   алг [цел] ИмяАлгоритма([цел param1, цел param2, ...])
-//   нач
-//     ...операторы...
-//   кон
 static ASTNode* parse_func_def() {
-    ASTNode* func = create_node(AST_FUNC_DEF);
-    func->int_value = 0; // 0 = процедура (void), 1 = функция (цел)
-    advance(); // consume 'алг'
-
-    // Опциональный тип возвращаемого значения
-    if (current_token.type == TOKEN_TYPE_CEL) {
-        func->int_value = 1;
-        advance();
-    }
-
-    // Имя алгоритма
-    if (current_token.type != TOKEN_IDENTIFIER)
-        parse_error(current_token.line, "Ожидалось имя алгоритма после 'алг'", "");
-    func->string_value = current_token.value;
-    advance();
-
-    // Параметры в скобках (опционально)
+    ASTNode* func = create_node(AST_FUNC_DEF); advance(); // алг
+    if (current_token.type == TOKEN_TYPE_CEL || current_token.type == TOKEN_TYPE_LIT || current_token.type == TOKEN_TYPE_LOG) advance();
+    if (current_token.type != TOKEN_IDENTIFIER) parse_error(current_token.line, "Ожидалось имя алгоритма", "");
+    func->string_value = current_token.value; advance();
     if (current_token.type == TOKEN_LPAREN) {
-        advance(); // consume '('
+        advance();
         while (current_token.type != TOKEN_RPAREN && current_token.type != TOKEN_EOF) {
-            if (current_token.type != TOKEN_TYPE_CEL)
-                parse_error(current_token.line,
-                            "Ожидался тип параметра (например, 'цел')", "");
+            if (current_token.type != TOKEN_TYPE_CEL && current_token.type != TOKEN_TYPE_LIT && current_token.type != TOKEN_TYPE_LOG)
+                parse_error(current_token.line, "Ожидался тип параметра", "");
             advance();
-            if (current_token.type != TOKEN_IDENTIFIER)
-                parse_error(current_token.line, "Ожидалось имя параметра", "");
-
-            ASTNode* param = create_node(AST_PARAM);
-            param->string_value = current_token.value;
-            param->int_value = 1; // цел
-            add_child(func, param);
-            advance();
-
+            ASTNode* param = create_node(AST_PARAM); param->string_value = current_token.value;
+            add_child(func, param); advance();
             if (current_token.type == TOKEN_COMMA) advance();
         }
-        if (current_token.type != TOKEN_RPAREN)
-            parse_error(current_token.line, "Ожидалась ')' после параметров", "");
-        advance(); // consume ')'
+        advance(); // ')'
     }
-
-    // нач
-    if (current_token.type != TOKEN_NACH)
-        parse_error(current_token.line,
-                    "Ожидалось 'нач' после заголовка алгоритма", func->string_value);
+    if (current_token.type != TOKEN_NACH) parse_error(current_token.line, "Ожидалось 'нач'", "");
     advance();
-
-    // Тело: список операторов до 'кон'
     ASTNode* body = create_node(AST_BODY);
-    while (current_token.type != TOKEN_KON && current_token.type != TOKEN_EOF) {
-        add_child(body, parse_statement());
-    }
-    if (current_token.type != TOKEN_KON)
-        parse_error(current_token.line,
-                    "Ожидалось 'кон' в конце алгоритма", func->string_value);
-    advance(); // consume 'кон'
-
-    func->left = body;
-    return func;
+    while (current_token.type != TOKEN_KON && current_token.type != TOKEN_EOF) add_child(body, parse_statement());
+    advance(); // 'кон'
+    func->left = body; return func;
 }
 
-// ========================
-// Точка входа парсера
-// ========================
 ASTNode* parse(const char* source) {
-    src_ptr      = source;
-    current_line = 1;
-    advance();
-
+    src_ptr = source; current_line = 1; advance();
     ASTNode* program = create_node(AST_PROGRAM);
 
-    // Файл — это список определений алгоритмов
     while (current_token.type != TOKEN_EOF) {
-        if (current_token.type == TOKEN_ALG) {
+        if (current_token.type == TOKEN_ISPOLZOVAT) {
+            advance();
+            if (current_token.type == TOKEN_IDENTIFIER || current_token.type == TOKEN_STRING) {
+                char libname[256]; strcpy(libname, current_token.value); advance();
+                // Системные библиотеки просто пропускаем на уровне парсера (подключаются в интерпретаторе)
+                if (strcmp(libname, "Интернет") != 0 && strcmp(libname, "ОС") != 0 && strcmp(libname, "Система") != 0) {
+                    char* lib_source = read_file_content(libname);
+                    if (lib_source) {
+                        const char* old_src = src_ptr; int old_line = current_line; Token old_token = current_token;
+                        src_ptr = lib_source; current_line = 1; advance();
+                        while (current_token.type != TOKEN_EOF) {
+                            if (current_token.type == TOKEN_ALG) add_child(program, parse_func_def());
+                            else advance();
+                        }
+                        src_ptr = old_src; current_line = old_line; current_token = old_token; free(lib_source);
+                    }
+                }
+            }
+        } else if (current_token.type == TOKEN_ALG) {
             add_child(program, parse_func_def());
         } else {
-            parse_error(current_token.line,
-                        "Ожидалось объявление алгоритма ('алг')",
-                        current_token.value ? current_token.value : "");
+            parse_error(current_token.line, "Ожидалось 'алг' или 'использовать'", current_token.value);
         }
     }
-
     return program;
 }
