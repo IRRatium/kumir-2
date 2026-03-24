@@ -14,7 +14,7 @@ jobs:
     - name: Compile C source code
       # ДОБАВЛЕН ФЛАГ -lws2_32 ДЛЯ ПОДДЕРЖКИ SOCKETS НА WINDOWS
       run: |
-        gcc -O3 src/main.c src/lexer.c src/parser.c src/interpreter.c -lws2_32 -o kumir2.exe
+        gcc -O3 src/main.c src/lexer.c src/parser.c src/interpreter.c -lws2_32 -lwininet -o kumir2.exe
 
     - name: Upload EXE artifact
       uses: actions/upload-artifact@v4
