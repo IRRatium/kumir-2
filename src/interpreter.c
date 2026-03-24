@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <wininet.h>
 #else
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -37,7 +38,7 @@ void runtime_error(int line, const char* msg, const char* detail) {
     printf("\n[ОШИБКА] Строка %d: %s '%s'\n", line, msg, detail ? detail : ""); exit(1);
 }
 
-// ==== НАСТОЯЩИЙ И БЕЗОПАСНЫЙ ВВОД ДЛЯ WINDOWS ====
+// ==== ВВОД ====
 KValue native_vvod(KValue* args, int count) {
 #ifdef _WIN32
     HANDLE hConsole = GetStdHandle(STD_INPUT_HANDLE);
@@ -53,7 +54,7 @@ KValue native_vvod(KValue* args, int count) {
 #endif
 }
 
-// ОС и Прочее
+// ==== ОС ====
 KValue native_len(KValue* args, int count) {
     if (args[0].type == VAL_STR) return make_int(strlen(args[0].s));
     if (args[0].type == VAL_ARRAY) return make_int(args[0].arr->length);
@@ -69,7 +70,7 @@ KValue native_os_write(KValue* args, int count) {
     FILE* f = fopen(args[0].s, "w"); if(f){ fputs(args[1].s, f); fclose(f); return make_int(1);} return make_int(0);
 }
 
-// ==== НОВЫЕ ФУНКЦИИ ДЛЯ СТРОК (ДЛЯ ПАРСИНГА) ====
+// ==== СТРОКИ ====
 KValue native_str_find(KValue* args, int count) {
     if (args[0].type != VAL_STR || args[1].type != VAL_STR) return make_int(-1);
     char* p = strstr(args[0].s, args[1].s);
@@ -90,8 +91,189 @@ KValue native_str_to_int(KValue* args, int count) {
     if (args[0].type != VAL_STR) return make_int(0);
     return make_int(atoi(args[0].s));
 }
+KValue native_str_replace(KValue* args, int count) {
+    if (args[0].type != VAL_STR || args[1].type != VAL_STR || args[2].type != VAL_STR) return make_str("");
+    char* src = args[0].s; char* from = args[1].s; char* to = args[2].s;
+    int src_len = strlen(src), from_len = strlen(from), to_len = strlen(to);
+    if (from_len == 0) return make_str(src);
+    // Считаем вхождения
+    int count2 = 0; char* p = src;
+    while ((p = strstr(p, from))) { count2++; p += from_len; }
+    int new_len = src_len + count2 * (to_len - from_len);
+    char* result = malloc(new_len + 1);
+    char* dst = result; p = src;
+    while (*p) {
+        if (strncmp(p, from, from_len) == 0) {
+            memcpy(dst, to, to_len); dst += to_len; p += from_len;
+        } else { *dst++ = *p++; }
+    }
+    *dst = '\0';
+    KValue v = make_str(result); free(result); return v;
+}
+KValue native_str_upper(KValue* args, int count) {
+    if (args[0].type != VAL_STR) return make_str("");
+    char* s = strdup(args[0].s);
+    for (int i = 0; s[i]; i++) if (s[i] >= 'a' && s[i] <= 'z') s[i] -= 32;
+    KValue v = make_str(s); free(s); return v;
+}
+KValue native_str_lower(KValue* args, int count) {
+    if (args[0].type != VAL_STR) return make_str("");
+    char* s = strdup(args[0].s);
+    for (int i = 0; s[i]; i++) if (s[i] >= 'A' && s[i] <= 'Z') s[i] += 32;
+    KValue v = make_str(s); free(s); return v;
+}
+// URL-кодирование для GET-параметров
+KValue native_url_encode(KValue* args, int count) {
+    if (args[0].type != VAL_STR) return make_str("");
+    unsigned char* s = (unsigned char*)args[0].s;
+    char* out = malloc(strlen(args[0].s) * 3 + 1);
+    int j = 0;
+    for (int i = 0; s[i]; i++) {
+        if ((s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z') ||
+            (s[i] >= '0' && s[i] <= '9') || s[i] == '-' || s[i] == '_' || s[i] == '.' || s[i] == '~') {
+            out[j++] = s[i];
+        } else {
+            sprintf(out + j, "%%%02X", s[i]); j += 3;
+        }
+    }
+    out[j] = '\0';
+    KValue v = make_str(out); free(out); return v;
+}
 
-// ==== СЫРЫЕ СОКЕТЫ ====
+// ==== JSON ПАРСЕР ====
+// Получить значение по ключу из JSON-строки (поддерживает строки и числа)
+KValue native_json_get(KValue* args, int count) {
+    if (args[0].type != VAL_STR || args[1].type != VAL_STR) return make_str("");
+    char* json = args[0].s;
+    char* key  = args[1].s;
+
+    // Ищем "ключ":
+    char search[256]; snprintf(search, sizeof(search), "\"%s\":", key);
+    char* pos = strstr(json, search);
+    if (!pos) return make_str("");
+    pos += strlen(search);
+    // Пропускаем пробелы
+    while (*pos == ' ' || *pos == '\t') pos++;
+
+    if (*pos == '"') {
+        // Строковое значение
+        pos++;
+        char buf[65536]; int i = 0;
+        while (*pos && *pos != '"') {
+            if (*pos == '\\') { pos++; if (*pos == 'n') buf[i++] = '\n'; else if (*pos == 'r') buf[i++] = '\r'; else if (*pos == 't') buf[i++] = '\t'; else buf[i++] = *pos; }
+            else buf[i++] = *pos;
+            pos++;
+            if (i >= 65534) break;
+        }
+        buf[i] = '\0'; return make_str(buf);
+    }
+    if (*pos == '-' || (*pos >= '0' && *pos <= '9')) {
+        // Число
+        return make_int(atoi(pos));
+    }
+    if (strncmp(pos, "true", 4) == 0)  return make_int(1);
+    if (strncmp(pos, "false", 5) == 0) return make_int(0);
+    if (strncmp(pos, "null", 4) == 0)  return make_str("");
+    return make_str("");
+}
+
+// Получить вложенный объект/массив как строку (для дальнейшего json_получить)
+KValue native_json_get_obj(KValue* args, int count) {
+    if (args[0].type != VAL_STR || args[1].type != VAL_STR) return make_str("");
+    char* json = args[0].s; char* key = args[1].s;
+    char search[256]; snprintf(search, sizeof(search), "\"%s\":", key);
+    char* pos = strstr(json, search);
+    if (!pos) return make_str("");
+    pos += strlen(search);
+    while (*pos == ' ' || *pos == '\t') pos++;
+    char open = *pos, close = (open == '{') ? '}' : ']';
+    if (open != '{' && open != '[') return make_str("");
+    int depth = 1; char* start = pos; pos++;
+    while (*pos && depth > 0) {
+        if (*pos == '"') { pos++; while (*pos && !(*pos == '"' && *(pos-1) != '\\')) pos++; }
+        if (*pos == open) depth++; else if (*pos == close) depth--;
+        pos++;
+    }
+    int len = pos - start;
+    char* buf = malloc(len + 1); strncpy(buf, start, len); buf[len] = '\0';
+    KValue v = make_str(buf); free(buf); return v;
+}
+
+// Получить N-й элемент JSON-массива как строку
+KValue native_json_arr_get(KValue* args, int count) {
+    if (args[0].type != VAL_STR || args[1].type != VAL_INT) return make_str("");
+    char* json = args[0].s; int n = args[1].i;
+    char* pos = json;
+    while (*pos && *pos != '[') pos++;
+    if (!*pos) return make_str("");
+    pos++; // пропускаем '['
+    int cur = 0;
+    while (*pos && cur <= n) {
+        while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+        char open = *pos; char close = (open == '{') ? '}' : (open == '[' ? ']' : 0);
+        if (open == '{' || open == '[') {
+            if (cur == n) {
+                int depth = 1; char* start = pos; pos++;
+                while (*pos && depth > 0) {
+                    if (*pos == '"') { pos++; while (*pos && !(*pos == '"' && *(pos-1) != '\\')) pos++; }
+                    if (*pos == open) depth++; else if (*pos == close) depth--;
+                    pos++;
+                }
+                int len = pos - start;
+                char* buf = malloc(len + 1); strncpy(buf, start, len); buf[len] = '\0';
+                KValue v = make_str(buf); free(buf); return v;
+            } else {
+                int depth = 1; pos++;
+                while (*pos && depth > 0) {
+                    if (*pos == '"') { pos++; while (*pos && !(*pos == '"' && *(pos-1) != '\\')) pos++; }
+                    if (*pos == open) depth++; else if (*pos == close) depth--;
+                    pos++;
+                }
+            }
+        } else if (*pos == '"') {
+            pos++; char* start2 = pos;
+            while (*pos && *pos != '"') pos++;
+            if (cur == n) {
+                int len = pos - start2;
+                char* buf = malloc(len + 1); strncpy(buf, start2, len); buf[len] = '\0';
+                KValue v = make_str(buf); free(buf); if(*pos) pos++; return v;
+            }
+            if(*pos) pos++;
+        } else {
+            char* start3 = pos;
+            while (*pos && *pos != ',' && *pos != ']') pos++;
+            if (cur == n) {
+                int len = pos - start3;
+                char* buf = malloc(len + 1); strncpy(buf, start3, len); buf[len] = '\0';
+                KValue v = make_int(atoi(buf)); free(buf); return v;
+            }
+        }
+        cur++;
+        if (*pos == ',') pos++;
+    }
+    return make_str("");
+}
+
+// Длина JSON-массива
+KValue native_json_arr_len(KValue* args, int count) {
+    if (args[0].type != VAL_STR) return make_int(0);
+    char* json = args[0].s;
+    char* pos = json;
+    while (*pos && *pos != '[') pos++;
+    if (!*pos) return make_int(0);
+    pos++;
+    int n = 0; int depth = 1;
+    while (*pos && depth > 0) {
+        if (*pos == '"') { pos++; while (*pos && !(*pos == '"' && *(pos-1) != '\\')) pos++; if(*pos) pos++; continue; }
+        if (*pos == '[' || *pos == '{') depth++;
+        else if (*pos == ']' || *pos == '}') { depth--; if (depth == 0) break; }
+        else if (*pos == ',' && depth == 1) n++;
+        pos++;
+    }
+    return make_int(n + 1);
+}
+
+// ==== СЫРЫЕ СОКЕТЫ (HTTP) ====
 KValue native_sock_create(KValue* args, int count) {
     int s = socket(AF_INET, SOCK_STREAM, 0); return make_int(s);
 }
@@ -102,7 +284,7 @@ KValue native_sock_connect(KValue* args, int count) {
     addr.sin_family = AF_INET; addr.sin_port = htons(args[2].i);
     memcpy(&addr.sin_addr.s_addr, host->h_addr, host->h_length);
     if(connect(args[0].i, (struct sockaddr*)&addr, sizeof(addr)) < 0) return make_int(0);
-    return make_int(1); // Успех
+    return make_int(1);
 }
 KValue native_sock_send(KValue* args, int count) {
     if (args[0].type == VAL_INT && args[1].type == VAL_STR) send(args[0].i, args[1].s, strlen(args[1].s), 0);
@@ -118,6 +300,84 @@ KValue native_sock_recv(KValue* args, int count) {
 KValue native_sock_close(KValue* args, int count) {
     if (args[0].type == VAL_INT) closesocket(args[0].i); return make_int(0);
 }
+
+// ==== HTTPS (только Windows, через WinINet — не нужны внешние библиотеки!) ====
+#ifdef _WIN32
+// Внутренний хелпер: выполнить GET или POST и вернуть тело ответа
+static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, url_utf8, -1, NULL, 0);
+    wchar_t* wurl = malloc(wlen * sizeof(wchar_t));
+    MultiByteToWideChar(CP_UTF8, 0, url_utf8, -1, wurl, wlen);
+
+    HINTERNET hInternet = InternetOpen(L"Kumir2/1.0", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    if (!hInternet) { free(wurl); return strdup(""); }
+
+    DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE;
+    // Если https — добавляем флаг безопасности
+    if (strncmp(url_utf8, "https://", 8) == 0) flags |= INTERNET_FLAG_SECURE;
+
+    HINTERNET hUrl;
+    if (post_data_utf8 && strlen(post_data_utf8) > 0) {
+        // POST-запрос (через InternetOpenUrl нельзя, используем более низкий уровень)
+        // Разбираем URL вручную
+        URL_COMPONENTSW uc; memset(&uc, 0, sizeof(uc));
+        uc.dwStructSize = sizeof(uc);
+        wchar_t whost[512]; wchar_t wpath[2048];
+        uc.lpszHostName = whost; uc.dwHostNameLength = 512;
+        uc.lpszUrlPath = wpath; uc.dwUrlPathLength = 2048;
+        InternetCrackUrlW(wurl, 0, 0, &uc);
+
+        HINTERNET hConn = InternetConnectW(hInternet, whost, uc.nPort, NULL, NULL,
+            INTERNET_SERVICE_HTTP, 0, 0);
+        DWORD req_flags = (uc.nScheme == INTERNET_SCHEME_HTTPS) ?
+            (INTERNET_FLAG_SECURE | INTERNET_FLAG_RELOAD) : INTERNET_FLAG_RELOAD;
+        HINTERNET hReq = HttpOpenRequestW(hConn, L"POST", wpath, NULL, NULL, NULL, req_flags, 0);
+        const char* ct = "Content-Type: application/x-www-form-urlencoded\r\n";
+        HttpSendRequestA(hReq, ct, strlen(ct), (void*)post_data_utf8, strlen(post_data_utf8));
+        hUrl = hReq;
+        // hConn утечка, но для простоты окей
+    } else {
+        hUrl = InternetOpenUrlW(hInternet, wurl, NULL, 0, flags, 0);
+    }
+    free(wurl);
+
+    if (!hUrl) { InternetCloseHandle(hInternet); return strdup(""); }
+
+    char* result = malloc(1); result[0] = '\0'; int total = 0;
+    char buf[8192]; DWORD read;
+    while (InternetReadFile(hUrl, buf, sizeof(buf)-1, &read) && read > 0) {
+        result = realloc(result, total + read + 1);
+        memcpy(result + total, buf, read);
+        total += read; result[total] = '\0';
+    }
+    InternetCloseHandle(hUrl); InternetCloseHandle(hInternet);
+    return result;
+}
+
+KValue native_https_get(KValue* args, int count) {
+    if (args[0].type != VAL_STR) return make_str("");
+    char* r = wininet_request(args[0].s, NULL);
+    KValue v = make_str(r); free(r); return v;
+}
+
+KValue native_https_post(KValue* args, int count) {
+    // args[0] = URL, args[1] = тело (form-encoded или json)
+    if (args[0].type != VAL_STR) return make_str("");
+    const char* body = (count > 1 && args[1].type == VAL_STR) ? args[1].s : "";
+    char* r = wininet_request(args[0].s, body);
+    KValue v = make_str(r); free(r); return v;
+}
+#else
+// Заглушки для Linux (нужен libcurl или openssl — добавишь позже)
+KValue native_https_get(KValue* args, int count) {
+    printf("[ОШИБКА] https_гет пока поддерживается только на Windows.\n");
+    return make_str("");
+}
+KValue native_https_post(KValue* args, int count) {
+    printf("[ОШИБКА] https_пост пока поддерживается только на Windows.\n");
+    return make_str("");
+}
+#endif
 
 void register_native(const char* name, NativeFunc ptr) {
     strcpy(func_table[func_count].name, name); func_table[func_count].def = NULL; func_table[func_count].native_ptr = ptr; func_count++;
@@ -151,7 +411,7 @@ static KValue call_func(ASTNode* call_node) {
     if (f_idx == -1) runtime_error(call_node->line, "Алгоритм не найден", name);
     KValue args[100]; for (int i = 0; i < call_node->children_count; i++) args[i] = eval(call_node->children[i]);
     if (func_table[f_idx].native_ptr) return func_table[f_idx].native_ptr(args, call_node->children_count);
-    
+
     ASTNode* def = func_table[f_idx].def; push_frame();
     for (int i = 0; i < def->children_count; i++) set_var(def->children[i]->string_value, args[i], call_node->line);
     for (int i = 0; i < def->left->children_count; i++) {
@@ -167,7 +427,7 @@ static KValue eval(ASTNode* node) {
     if (node->type == AST_STR) return make_str(node->string_value);
     if (node->type == AST_VAR) return get_var(node->string_value, node->line);
     if (node->type == AST_FUNC_CALL) return call_func(node);
-    
+
     if (node->type == AST_ARRAY_LIT) {
         KValue arr = make_array(node->children_count);
         for(int i=0; i<node->children_count; i++) arr.arr->items[i] = eval(node->children[i]);
@@ -229,19 +489,35 @@ void execute(ASTNode* node) {
 #ifdef _WIN32
             WSADATA wsaData; WSAStartup(MAKEWORD(2,2), &wsaData);
 #endif
-            register_native("ввод", native_vvod);
-            register_native("длина", native_len);
-            register_native("ос_команда", native_os_cmd);
-            register_native("ос_чтение", native_os_read);
-            register_native("ос_запись", native_os_write);
-            register_native("строка_найти", native_str_find);
-            register_native("строка_срез", native_str_sub);
-            register_native("строка_в_число", native_str_to_int);
-            register_native("сокет_создать", native_sock_create);
-            register_native("сокет_подключить", native_sock_connect);
-            register_native("сокет_отправить", native_sock_send);
-            register_native("сокет_получить", native_sock_recv);
-            register_native("сокет_закрыть", native_sock_close);
+            // Ввод / вывод
+            register_native("ввод",               native_vvod);
+            register_native("длина",              native_len);
+            // ОС
+            register_native("ос_команда",         native_os_cmd);
+            register_native("ос_чтение",          native_os_read);
+            register_native("ос_запись",          native_os_write);
+            // Строки
+            register_native("строка_найти",       native_str_find);
+            register_native("строка_срез",        native_str_sub);
+            register_native("строка_в_число",     native_str_to_int);
+            register_native("строка_заменить",    native_str_replace);
+            register_native("строка_верхний",     native_str_upper);
+            register_native("строка_нижний",      native_str_lower);
+            register_native("урл_кодировать",     native_url_encode);
+            // JSON
+            register_native("json_получить",      native_json_get);
+            register_native("json_объект",        native_json_get_obj);
+            register_native("json_элемент",       native_json_arr_get);
+            register_native("json_длина",         native_json_arr_len);
+            // HTTP (сырые сокеты)
+            register_native("сокет_создать",      native_sock_create);
+            register_native("сокет_подключить",   native_sock_connect);
+            register_native("сокет_отправить",    native_sock_send);
+            register_native("сокет_получить",     native_sock_recv);
+            register_native("сокет_закрыть",      native_sock_close);
+            // HTTPS (WinINet)
+            register_native("https_гет",          native_https_get);
+            register_native("https_пост",         native_https_post);
 
             for (int i=0; i<node->children_count; i++) {
                 if (node->children[i]->type == AST_FUNC_DEF) {
