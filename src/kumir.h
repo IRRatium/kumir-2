@@ -6,6 +6,7 @@
 #include <string.h>
 
 // --- ЛЕКСЕР (Токены) ---
+// Переименовали TokenType в KTokenType, чтобы избежать конфликта с windows.h
 typedef enum {
     TOKEN_ALG,      // алг
     TOKEN_NACH,     // нач
@@ -14,10 +15,10 @@ typedef enum {
     TOKEN_STRING,   // "текст"
     TOKEN_EOF,      // Конец файла
     TOKEN_UNKNOWN
-} TokenType;
+} KTokenType;
 
 typedef struct {
-    TokenType type;
+    KTokenType type;
     char* value;
 } Token;
 
