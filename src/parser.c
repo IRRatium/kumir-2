@@ -23,6 +23,18 @@ static ASTNode* parse_statement();
 
 static ASTNode* parse_factor() {
     ASTNode* node = NULL;
+    if (current_token.type == TOKEN_MINUS) {
+        advance();
+        ASTNode* inner = parse_factor();
+        ASTNode* zero = create_node(AST_NUM);
+        zero->int_value = 0;
+        ASTNode* neg = create_node(AST_BINOP);
+        neg->string_value = "-";
+        neg->left = zero;
+        neg->right = inner;
+        return neg;
+    }
+    
     if (current_token.type == TOKEN_NUMBER) { node = create_node(AST_NUM); node->int_value = atoi(current_token.value); advance(); }
     else if (current_token.type == TOKEN_FLOAT_LIT) { node = create_node(AST_FLOAT); node->float_value = atof(current_token.value); advance(); }
     else if (current_token.type == TOKEN_DA || current_token.type == TOKEN_NET) { node = create_node(AST_NUM); node->int_value = (current_token.type == TOKEN_DA) ? 1 : 0; advance(); }
