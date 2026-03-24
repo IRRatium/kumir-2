@@ -69,7 +69,29 @@ KValue native_os_write(KValue* args, int count) {
     FILE* f = fopen(args[0].s, "w"); if(f){ fputs(args[1].s, f); fclose(f); return make_int(1);} return make_int(0);
 }
 
-// ==== СЫРЫЕ СОКЕТЫ ДЛЯ НАПИСАНИЯ БИБЛИОТЕК НА КУМИР 2 ====
+// ==== НОВЫЕ ФУНКЦИИ ДЛЯ СТРОК (ДЛЯ ПАРСИНГА) ====
+KValue native_str_find(KValue* args, int count) {
+    if (args[0].type != VAL_STR || args[1].type != VAL_STR) return make_int(-1);
+    char* p = strstr(args[0].s, args[1].s);
+    if (p) return make_int(p - args[0].s);
+    return make_int(-1);
+}
+KValue native_str_sub(KValue* args, int count) {
+    if (args[0].type != VAL_STR || args[1].type != VAL_INT || args[2].type != VAL_INT) return make_str("");
+    int start = args[1].i; int end = args[2].i;
+    int len = strlen(args[0].s);
+    if (start < 0) start = 0; if (end > len) end = len;
+    if (start > end || start >= len) return make_str("");
+    char* buf = malloc(end - start + 1);
+    strncpy(buf, args[0].s + start, end - start); buf[end - start] = '\0';
+    KValue res = make_str(buf); free(buf); return res;
+}
+KValue native_str_to_int(KValue* args, int count) {
+    if (args[0].type != VAL_STR) return make_int(0);
+    return make_int(atoi(args[0].s));
+}
+
+// ==== СЫРЫЕ СОКЕТЫ ====
 KValue native_sock_create(KValue* args, int count) {
     int s = socket(AF_INET, SOCK_STREAM, 0); return make_int(s);
 }
@@ -174,7 +196,7 @@ static KValue eval(ASTNode* node) {
         if (strcmp(op, "-") == 0) return (l.type==VAL_FLOAT||r.type==VAL_FLOAT) ? make_float((l.type==VAL_FLOAT?l.f:l.i) - (r.type==VAL_FLOAT?r.f:r.i)) : make_int(l.i - r.i);
         if (strcmp(op, "*") == 0) return (l.type==VAL_FLOAT||r.type==VAL_FLOAT) ? make_float((l.type==VAL_FLOAT?l.f:l.i) * (r.type==VAL_FLOAT?r.f:r.i)) : make_int(l.i * r.i);
         if (strcmp(op, "/") == 0) return (l.type==VAL_FLOAT||r.type==VAL_FLOAT) ? make_float((l.type==VAL_FLOAT?l.f:l.i) / (r.type==VAL_FLOAT?r.f:r.i)) : make_int(l.i / r.i);
-        if (strcmp(op, "%") == 0) return make_int(l.i % (r.i == 0 ? 1 : r.i)); // Защита от деления на 0
+        if (strcmp(op, "%") == 0) return make_int(l.i % (r.i == 0 ? 1 : r.i));
 
         double lv = (l.type==VAL_FLOAT)?l.f:l.i; double rv = (r.type==VAL_FLOAT)?r.f:r.i;
         if (strcmp(op, "=") == 0) return l.type==VAL_STR ? make_int(strcmp(l.s, r.s)==0) : make_int(lv == rv);
@@ -212,6 +234,9 @@ void execute(ASTNode* node) {
             register_native("ос_команда", native_os_cmd);
             register_native("ос_чтение", native_os_read);
             register_native("ос_запись", native_os_write);
+            register_native("строка_найти", native_str_find);
+            register_native("строка_срез", native_str_sub);
+            register_native("строка_в_число", native_str_to_int);
             register_native("сокет_создать", native_sock_create);
             register_native("сокет_подключить", native_sock_connect);
             register_native("сокет_отправить", native_sock_send);
