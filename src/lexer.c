@@ -7,83 +7,73 @@ char* kumir_strndup(const char* s, size_t n) {
     return p;
 }
 
-void skip_whitespace_and_comments(const char** source, int* line) {
+void skip_ws_comments(const char** source, int* line) {
     while (**source != '\0') {
-        if (**source == ' ' || **source == '\t' || **source == '\r') {
-            (*source)++;
-        } else if (**source == '\n') {
-            (*line)++;
-            (*source)++;
-        } else if (**source == '|') {
-            while (**source != '\n' && **source != '\0') (*source)++;
-        } else {
-            break;
-        }
+        if (**source == ' ' || **source == '\t' || **source == '\r') (*source)++;
+        else if (**source == '\n') { (*line)++; (*source)++; }
+        else if (**source == '|') { while (**source != '\n' && **source != '\0') (*source)++; }
+        else break;
     }
 }
 
 Token get_next_token(const char** source, int* line) {
     Token token = {TOKEN_UNKNOWN, NULL, *line};
-    skip_whitespace_and_comments(source, line);
+    skip_ws_comments(source, line);
     token.line = *line;
-
     if (**source == '\0') { token.type = TOKEN_EOF; return token; }
 
-    // Двухсимвольные операторы
     if (strncmp(*source, ":=", 2) == 0) { *source += 2; token.type = TOKEN_ASSIGN; return token; }
     if (strncmp(*source, "<>", 2) == 0) { *source += 2; token.type = TOKEN_NEQ; return token; }
     if (strncmp(*source, "<=", 2) == 0) { *source += 2; token.type = TOKEN_LE; return token; }
     if (strncmp(*source, ">=", 2) == 0) { *source += 2; token.type = TOKEN_GE; return token; }
 
-    // Односимвольные операторы
     if (**source == '=') { (*source)++; token.type = TOKEN_EQ; return token; }
     if (**source == '<') { (*source)++; token.type = TOKEN_LT; return token; }
     if (**source == '>') { (*source)++; token.type = TOKEN_GT; return token; }
-    if (**source == '+') { (*source)++; token.type = TOKEN_PLUS;   return token; }
-    if (**source == '-') { (*source)++; token.type = TOKEN_MINUS;  return token; }
-    if (**source == '*') { (*source)++; token.type = TOKEN_MUL;    return token; }
-    if (**source == '/') { (*source)++; token.type = TOKEN_DIV;    return token; }
+    if (**source == '+') { (*source)++; token.type = TOKEN_PLUS; return token; }
+    if (**source == '-') { (*source)++; token.type = TOKEN_MINUS; return token; }
+    if (**source == '*') { (*source)++; token.type = TOKEN_MUL; return token; }
+    if (**source == '/') { (*source)++; token.type = TOKEN_DIV; return token; }
+    if (**source == '%') { (*source)++; token.type = TOKEN_MOD; return token; }
     if (**source == '(') { (*source)++; token.type = TOKEN_LPAREN; return token; }
     if (**source == ')') { (*source)++; token.type = TOKEN_RPAREN; return token; }
-    if (**source == ',') { (*source)++; token.type = TOKEN_COMMA;  return token; }
+    if (**source == '[') { (*source)++; token.type = TOKEN_LBRACKET; return token; }
+    if (**source == ']') { (*source)++; token.type = TOKEN_RBRACKET; return token; }
+    if (**source == ',') { (*source)++; token.type = TOKEN_COMMA; return token; }
 
     if (isdigit((unsigned char)**source)) {
-        const char* start = *source;
-        while (isdigit((unsigned char)**source)) (*source)++;
-        token.type = TOKEN_NUMBER;
-        token.value = kumir_strndup(start, *source - start);
-        return token;
+        const char* start = *source; int has_dot = 0;
+        while (isdigit((unsigned char)**source) || **source == '.') {
+            if (**source == '.') has_dot = 1;
+            (*source)++;
+        }
+        token.type = has_dot ? TOKEN_FLOAT_LIT : TOKEN_NUMBER;
+        token.value = kumir_strndup(start, *source - start); return token;
     }
 
     if (**source == '"') {
-        (*source)++;
-        const char* start = *source;
-        while (**source != '"' && **source != '\0') {
-            if (**source == '\n') (*line)++;
-            (*source)++;
-        }
-        token.type = TOKEN_STRING;
-        token.value = kumir_strndup(start, *source - start);
-        if (**source == '"') (*source)++;
-        return token;
+        (*source)++; const char* start = *source;
+        while (**source != '"' && **source != '\0') { if (**source == '\n') (*line)++; (*source)++; }
+        token.type = TOKEN_STRING; token.value = kumir_strndup(start, *source - start);
+        if (**source == '"') (*source)++; return token;
     }
 
     const char* start = *source;
-    while (isalnum((unsigned char)**source) || (unsigned char)**source > 127 || **source == '_') {
-        (*source)++;
-    }
-
-    int length = *source - start;
-    if (length > 0) {
-        char* word = kumir_strndup(start, length);
+    while (isalnum((unsigned char)**source) || (unsigned char)**source > 127 || **source == '_') (*source)++;
+    
+    int len = *source - start;
+    if (len > 0) {
+        char* word = kumir_strndup(start, len);
         if      (strcmp(word, "алг")   == 0) token.type = TOKEN_ALG;
         else if (strcmp(word, "нач")   == 0) token.type = TOKEN_NACH;
         else if (strcmp(word, "кон")   == 0) token.type = TOKEN_KON;
         else if (strcmp(word, "вывод") == 0) token.type = TOKEN_VYVOD;
-        else if (strcmp(word, "знач")  == 0) token.type = TOKEN_ZNACH;
+        else if (strcmp(word, "возврат")== 0) token.type = TOKEN_VOZVRAT;
         else if (strcmp(word, "цел")   == 0) token.type = TOKEN_TYPE_CEL;
+        else if (strcmp(word, "вещ")   == 0) token.type = TOKEN_TYPE_VESH;
         else if (strcmp(word, "лит")   == 0) token.type = TOKEN_TYPE_LIT;
         else if (strcmp(word, "лог")   == 0) token.type = TOKEN_TYPE_LOG;
+        else if (strcmp(word, "таб")   == 0) token.type = TOKEN_TYPE_TAB;
         else if (strcmp(word, "если")  == 0) token.type = TOKEN_ESLI;
         else if (strcmp(word, "то")    == 0) token.type = TOKEN_TO;
         else if (strcmp(word, "иначе") == 0) token.type = TOKEN_INACHE;
@@ -99,10 +89,7 @@ Token get_next_token(const char** source, int* line) {
         else if (strcmp(word, "или")   == 0) token.type = TOKEN_OR;
         else if (strcmp(word, "не")    == 0) token.type = TOKEN_NOT;
         else                                 token.type = TOKEN_IDENTIFIER;
-        token.value = word;
-        return token;
+        token.value = word; return token;
     }
-
-    (*source)++;
-    return token;
+    (*source)++; return token;
 }
