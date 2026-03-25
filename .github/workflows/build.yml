@@ -1,4 +1,4 @@
-name: Build Kumir 2 (Windows EXE)
+name: Build Kumir 2
 
 on:
   workflow_dispatch:
@@ -11,13 +11,30 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Compile C source code
-      # ДОБАВЛЕН ФЛАГ -lws2_32 ДЛЯ ПОДДЕРЖКИ SOCKETS НА WINDOWS
+    - name: Compile (Windows)
+      # ИСПРАВЛЕНО: добавлен -lm для math.h функций
       run: |
-        gcc -O3 src/main.c src/lexer.c src/parser.c src/interpreter.c -lws2_32 -lwininet -o kumir2.exe
+        gcc -O3 src/main.c src/lexer.c src/parser.c src/interpreter.c -lws2_32 -lwininet -lm -o kumir2.exe
 
     - name: Upload EXE artifact
       uses: actions/upload-artifact@v4
       with:
         name: kumir2-windows
         path: kumir2.exe
+
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Compile (Linux)
+      run: |
+        gcc -O3 src/main.c src/lexer.c src/parser.c src/interpreter.c -lm -o kumir2
+
+    - name: Upload Linux artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: kumir2-linux
+        path: kumir2
