@@ -210,11 +210,19 @@ ASTNode* parse(const char* source) {
     ASTNode* program = create_node(AST_PROGRAM);
 
     while (current_token.type != TOKEN_EOF) {
+        // СТАЛО:
         if (current_token.type == TOKEN_ISPOLZOVAT) {
-            int err_line = current_line;
-            advance();
-            char libname[256]; strcpy(libname, current_token.value);
-            advance();
+        int err_line = current_line;
+        advance();
+        char libname[256]; strcpy(libname, current_token.value);
+        advance();
+        // Если следующий токен — точка (TOKEN_UNKNOWN), пропускаем ".kum"
+        if (current_token.type == TOKEN_UNKNOWN) {
+            advance(); // пропускаем '.'
+            if (current_token.type == TOKEN_IDENTIFIER) advance(); // пропускаем 'kum'
+        }
+        // Добавляем .kum если расширения нет
+        if (!strstr(libname, ".")) strcat(libname, ".kum");
 
             char* lib_source = read_file_content(libname);
             if (lib_source) {
