@@ -22,24 +22,24 @@ Token get_next_token(const char** source, int* line) {
     token.line = *line;
     if (**source == '\0') { token.type = TOKEN_EOF; return token; }
 
-    if (strncmp(*source, ":=", 2) == 0) { *source += 2; token.type = TOKEN_ASSIGN; return token; }
-    if (strncmp(*source, "<>", 2) == 0) { *source += 2; token.type = TOKEN_NEQ; return token; }
-    if (strncmp(*source, "<=", 2) == 0) { *source += 2; token.type = TOKEN_LE; return token; }
-    if (strncmp(*source, ">=", 2) == 0) { *source += 2; token.type = TOKEN_GE; return token; }
+    if (strncmp(*source, ":=", 2) == 0) { *source += 2; token.type = TOKEN_ASSIGN; token.value = ":="; return token; }
+    if (strncmp(*source, "<>", 2) == 0) { *source += 2; token.type = TOKEN_NEQ; token.value = "<>"; return token; }
+    if (strncmp(*source, "<=", 2) == 0) { *source += 2; token.type = TOKEN_LE; token.value = "<="; return token; }
+    if (strncmp(*source, ">=", 2) == 0) { *source += 2; token.type = TOKEN_GE; token.value = ">="; return token; }
 
-    if (**source == '=') { (*source)++; token.type = TOKEN_EQ; return token; }
-    if (**source == '<') { (*source)++; token.type = TOKEN_LT; return token; }
-    if (**source == '>') { (*source)++; token.type = TOKEN_GT; return token; }
-    if (**source == '+') { (*source)++; token.type = TOKEN_PLUS; return token; }
-    if (**source == '-') { (*source)++; token.type = TOKEN_MINUS; return token; }
-    if (**source == '*') { (*source)++; token.type = TOKEN_MUL; return token; }
-    if (**source == '/') { (*source)++; token.type = TOKEN_DIV; return token; }
-    if (**source == '%') { (*source)++; token.type = TOKEN_MOD; return token; }
-    if (**source == '(') { (*source)++; token.type = TOKEN_LPAREN; return token; }
-    if (**source == ')') { (*source)++; token.type = TOKEN_RPAREN; return token; }
-    if (**source == '[') { (*source)++; token.type = TOKEN_LBRACKET; return token; }
-    if (**source == ']') { (*source)++; token.type = TOKEN_RBRACKET; return token; }
-    if (**source == ',') { (*source)++; token.type = TOKEN_COMMA; return token; }
+    if (**source == '=') { (*source)++; token.type = TOKEN_EQ; token.value = "="; return token; }
+    if (**source == '<') { (*source)++; token.type = TOKEN_LT; token.value = "<"; return token; }
+    if (**source == '>') { (*source)++; token.type = TOKEN_GT; token.value = ">"; return token; }
+    if (**source == '+') { (*source)++; token.type = TOKEN_PLUS; token.value = "+"; return token; }
+    if (**source == '-') { (*source)++; token.type = TOKEN_MINUS; token.value = "-"; return token; }
+    if (**source == '*') { (*source)++; token.type = TOKEN_MUL; token.value = "*"; return token; }
+    if (**source == '/') { (*source)++; token.type = TOKEN_DIV; token.value = "/"; return token; }
+    if (**source == '%') { (*source)++; token.type = TOKEN_MOD; token.value = "%"; return token; }
+    if (**source == '(') { (*source)++; token.type = TOKEN_LPAREN; token.value = "("; return token; }
+    if (**source == ')') { (*source)++; token.type = TOKEN_RPAREN; token.value = ")"; return token; }
+    if (**source == '[') { (*source)++; token.type = TOKEN_LBRACKET; token.value = "["; return token; }
+    if (**source == ']') { (*source)++; token.type = TOKEN_RBRACKET; token.value = "]"; return token; }
+    if (**source == ',') { (*source)++; token.type = TOKEN_COMMA; token.value = ","; return token; }
 
     if (isdigit((unsigned char)**source)) {
         const char* start = *source; int has_dot = 0;
@@ -66,6 +66,7 @@ Token get_next_token(const char** source, int* line) {
                 if (**source == 'n') buf[i++] = '\n';
                 else if (**source == 'r') buf[i++] = '\r';
                 else if (**source == 't') buf[i++] = '\t';
+                else if (**source == 'e') buf[i++] = '\033'; // ПОДДЕРЖКА ЦВЕТОВ (ANSI ESCAPE)
                 else if (**source == '"') buf[i++] = '"';
                 else if (**source == '\\') buf[i++] = '\\';
                 else buf[i++] = **source;
