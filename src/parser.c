@@ -23,6 +23,8 @@ static ASTNode* parse_statement();
 
 static ASTNode* parse_factor() {
     ASTNode* node = NULL;
+
+    // ИСПРАВЛЕНО: унарный минус
     if (current_token.type == TOKEN_MINUS) {
         advance();
         ASTNode* inner = parse_factor();
@@ -34,7 +36,18 @@ static ASTNode* parse_factor() {
         neg->right = inner;
         return neg;
     }
-    
+
+    // ИСПРАВЛЕНО: оператор "не" теперь корректно обрабатывается
+    if (current_token.type == TOKEN_NOT) {
+        advance();
+        ASTNode* inner = parse_factor();
+        ASTNode* not_node = create_node(AST_BINOP);
+        not_node->string_value = "не";
+        not_node->left = inner;
+        not_node->right = NULL;
+        return not_node;
+    }
+
     if (current_token.type == TOKEN_NUMBER) { node = create_node(AST_NUM); node->int_value = atoi(current_token.value); advance(); }
     else if (current_token.type == TOKEN_FLOAT_LIT) { node = create_node(AST_FLOAT); node->float_value = atof(current_token.value); advance(); }
     else if (current_token.type == TOKEN_DA || current_token.type == TOKEN_NET) { node = create_node(AST_NUM); node->int_value = (current_token.type == TOKEN_DA) ? 1 : 0; advance(); }
@@ -158,13 +171,12 @@ static ASTNode* parse_statement() {
         while (current_token.type == TOKEN_COMMA) { advance(); add_child(print_node, parse_expr()); }
         return print_node;
     }
-    
-    // Универсальная обработка присваивания и вызовов (через parse_factor)
+
     if (current_token.type == TOKEN_IDENTIFIER) {
         ASTNode* target = parse_factor();
         if (current_token.type == TOKEN_ASSIGN) {
             ASTNode* assign = create_node(AST_ASSIGN);
-            assign->left = target; advance(); // :=
+            assign->left = target; advance();
             assign->right = parse_expr(); return assign;
         }
         if (target->type == AST_FUNC_CALL) return target;
@@ -199,11 +211,11 @@ ASTNode* parse(const char* source) {
 
     while (current_token.type != TOKEN_EOF) {
         if (current_token.type == TOKEN_ISPOLZOVAT) {
-            int err_line = current_line; // Запоминаем строку
-            advance(); 
-            char libname[256]; strcpy(libname, current_token.value); 
+            int err_line = current_line;
             advance();
-            
+            char libname[256]; strcpy(libname, current_token.value);
+            advance();
+
             char* lib_source = read_file_content(libname);
             if (lib_source) {
                 const char* old_src = src_ptr; int old_line = current_line; Token old_token = current_token;
@@ -213,7 +225,6 @@ ASTNode* parse(const char* source) {
                 }
                 src_ptr = old_src; current_line = old_line; current_token = old_token; free(lib_source);
             } else {
-                // ТЕПЕРЬ ОН БУДЕТ ГРОМКО ОРАТЬ, ЕСЛИ ФАЙЛ НЕ НАЙДЕН
                 parse_error(err_line, "КРИТИЧЕСКАЯ ОШИБКА: Не удалось найти или открыть библиотеку", libname);
             }
         } else if (current_token.type == TOKEN_ALG) {
@@ -224,6 +235,3 @@ ASTNode* parse(const char* source) {
     }
     return program;
 }
-
-
-
