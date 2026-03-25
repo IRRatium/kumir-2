@@ -4,11 +4,9 @@
 #include <windows.h>
 #endif
 
-// Универсальное чтение файлов, понимающее русские названия на Windows!
 char* read_file_content(const char* filename) {
     FILE* file = NULL;
 #ifdef _WIN32
-    // Преобразуем UTF-8 имя файла в UTF-16 для Windows
     int wchars_num = MultiByteToWideChar(CP_UTF8, 0, filename, -1, NULL, 0);
     wchar_t* wstr = malloc(wchars_num * sizeof(wchar_t));
     MultiByteToWideChar(CP_UTF8, 0, filename, -1, wstr, wchars_num);
