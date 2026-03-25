@@ -469,7 +469,8 @@ static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
     DWORD flags = INTERNET_FLAG_RELOAD
                 | INTERNET_FLAG_NO_CACHE_WRITE
                 | INTERNET_FLAG_NO_COOKIES
-                | INTERNET_FLAG_IGNORE_CERT_ERRORS;   // <-- ключевое исправление
+                | INTERNET_FLAG_IGNORE_CERT_CN_INVALID
+                | INTERNET_FLAG_IGNORE_CERT_DATE_INVALID;
     if (strncmp(url_utf8, "https://", 8) == 0) flags |= INTERNET_FLAG_SECURE;
 
     HINTERNET hUrl  = NULL;
@@ -491,7 +492,8 @@ static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
             return strdup("");
         }
 
-        DWORD req_flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_IGNORE_CERT_ERRORS;
+        DWORD req_flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_IGNORE_CERT_CN_INVALID
+                | INTERNET_FLAG_IGNORE_CERT_DATE_INVALID;
         if (uc.nScheme == INTERNET_SCHEME_HTTPS) req_flags |= INTERNET_FLAG_SECURE;
 
         HINTERNET hReq = HttpOpenRequestW(hConn, L"POST", wpath, NULL, NULL, NULL, req_flags, 0);
