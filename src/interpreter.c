@@ -5,23 +5,23 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <ws2tcpip.h>
-#include <wininet.h>
 #else
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <netdb.h>
+#include <dlfcn.h>
 #define closesocket close
 #endif
 
 // ========================
 // ЗНАЧЕНИЯ
 // ========================
-KValue make_int(long long v) { KValue val; val.type = VAL_INT;   val.i = v;   val.f = 0.0; val.s = NULL; val.arr = NULL; return val; }
-KValue make_float(double v){ KValue val; val.type = VAL_FLOAT; val.i = 0;   val.f = v;   val.s = NULL; val.arr = NULL; return val; }
-KValue make_str(const char* v) { KValue val; val.type = VAL_STR; val.s = strdup(v ? v : ""); val.arr = NULL; return val; }
+KValue make_int(long long v) { KValue val; val.type = VAL_INT;   val.i = v;   val.f = 0.0; val.s = NULL; val.arr = NULL; val.dict = NULL; return val; }
+KValue make_float(double v){ KValue val; val.type = VAL_FLOAT; val.i = 0;   val.f = v;   val.s = NULL; val.arr = NULL; val.dict = NULL; return val; }
+KValue make_str(const char* v) { KValue val; val.type = VAL_STR; val.s = strdup(v ? v : ""); val.arr = NULL; val.dict = NULL; return val; }
 KValue make_array(int size) {
-    KValue val; val.type = VAL_ARRAY; val.arr = malloc(sizeof(KArray));
+    KValue val; val.type = VAL_ARRAY; val.arr = malloc(sizeof(KArray)); val.dict = NULL;
     val.arr->ref_count = 1; val.arr->length = size; val.arr->items = malloc(size * sizeof(KValue));
     for (int i = 0; i < size; i++) val.arr->items[i] = make_int(0);
     return val;
@@ -57,43 +57,6 @@ void runtime_error(int line, const char* msg, const char* detail) {
 }
 
 // ========================
-// ГЛОБАЛЬНЫЕ НАСТРОЙКИ СЕТИ
-// ========================
-static char GLOBAL_USER_AGENT[512] = "Kumir2/1.0";
-static char GLOBAL_HEADERS[4096]   = "";
-static char GLOBAL_COOKIES[4096]   = "";
-
-KValue native_set_useragent(KValue* args, int count) {
-    if (args[0].type == VAL_STR)
-        strncpy(GLOBAL_USER_AGENT, args[0].s, sizeof(GLOBAL_USER_AGENT) - 1);
-    return make_int(0);
-}
-KValue native_add_header(KValue* args, int count) {
-    if (args[0].type == VAL_STR) {
-        size_t remaining = sizeof(GLOBAL_HEADERS) - strlen(GLOBAL_HEADERS) - 3;
-        if (strlen(args[0].s) < remaining) {
-            strcat(GLOBAL_HEADERS, args[0].s);
-            strcat(GLOBAL_HEADERS, "\r\n");
-        }
-    }
-    return make_int(0);
-}
-KValue native_clear_headers(KValue* args, int count) { GLOBAL_HEADERS[0] = '\0'; return make_int(0); }
-
-KValue native_add_cookie(KValue* args, int count) {
-    if (args[0].type == VAL_STR) {
-        size_t cur = strlen(GLOBAL_COOKIES);
-        size_t remaining = sizeof(GLOBAL_COOKIES) - cur - 3;
-        if (strlen(args[0].s) < remaining) {
-            if (cur > 0) strcat(GLOBAL_COOKIES, "; ");
-            strcat(GLOBAL_COOKIES, args[0].s);
-        }
-    }
-    return make_int(0);
-}
-KValue native_clear_cookies(KValue* args, int count) { GLOBAL_COOKIES[0] = '\0'; return make_int(0); }
-
-// ========================
 // ВВОД
 // ========================
 KValue native_vvod(KValue* args, int count) {
@@ -112,7 +75,7 @@ KValue native_vvod(KValue* args, int count) {
 }
 
 // ========================
-// ОС
+// ОС И УТИЛИТЫ
 // ========================
 KValue native_len(KValue* args, int count) {
     if (args[0].type == VAL_STR)   return make_int((int)strlen(args[0].s));
@@ -279,7 +242,6 @@ KValue native_url_encode(KValue* args, int count) {
     KValue v = make_str(out); free(out); return v;
 }
 
-
 // ========================
 // UTF-8 хелпер для JSON
 // ========================
@@ -289,8 +251,6 @@ static int unicode_to_utf8(unsigned int cp, char* out) {
     out[0] = (char)(0xE0|(cp>>12)); out[1] = (char)(0x80|((cp>>6)&0x3F)); out[2] = (char)(0x80|(cp&0x3F)); return 3;
 }
 
-// Разбор JSON-строки начиная с символа после открывающей кавычки.
-// Записывает результат в buf (размер buf_size), возвращает указатель на закрывающую кавычку.
 static const char* json_parse_str(const char* pos, char* buf, int buf_size) {
     int i = 0;
     while (*pos && *pos != '"') {
@@ -329,10 +289,7 @@ KValue native_json_get(KValue* args, int count) {
     pos += strlen(search);
     while (*pos == ' ' || *pos == '\t') pos++;
     if (*pos == '"') {
-        pos++;
-        char buf[65536];
-        pos = json_parse_str(pos, buf, sizeof(buf));
-        return make_str(buf);
+        pos++; char buf[65536]; pos = json_parse_str(pos, buf, sizeof(buf)); return make_str(buf);
     }
     if (*pos == '-' || (*pos >= '0' && *pos <= '9')) return make_int(atoll(pos));
     if (strncmp(pos, "true",  4) == 0) return make_int(1);
@@ -394,15 +351,11 @@ KValue native_json_arr_get(KValue* args, int count) {
         } else if (*pos == '"') {
             pos++;
             if (cur == n) {
-                char buf[65536];
-                pos = json_parse_str(pos, buf, sizeof(buf));
+                char buf[65536]; pos = json_parse_str(pos, buf, sizeof(buf));
                 if (*pos == '"') pos++;
                 return make_str(buf);
             }
-            // не наш элемент — пропускаем строку
-            while (*pos && *pos != '"') {
-                if (*pos == '\\') { pos++; if (*pos) pos++; } else pos++;
-            }
+            while (*pos && *pos != '"') { if (*pos == '\\') { pos++; if (*pos) pos++; } else pos++; }
             if (*pos) pos++;
         } else {
             char* start3 = pos;
@@ -429,12 +382,7 @@ KValue native_json_arr_len(KValue* args, int count) {
     if (*pos == ']') return make_int(0);
     int n = 0, depth = 1;
     while (*pos && depth > 0) {
-        if (*pos == '"') {
-            pos++;
-            while (*pos && !(*pos == '"' && *(pos-1) != '\\')) pos++;
-            if (*pos) pos++;
-            continue;
-        }
+        if (*pos == '"') { pos++; while (*pos && !(*pos == '"' && *(pos-1) != '\\')) pos++; if (*pos) pos++; continue; }
         if (*pos == '[' || *pos == '{') depth++;
         else if (*pos == ']' || *pos == '}') { depth--; if (depth == 0) break; }
         else if (*pos == ',' && depth == 1) n++;
@@ -444,7 +392,39 @@ KValue native_json_arr_len(KValue* args, int count) {
 }
 
 // ========================
-// СЫРЫЕ СОКЕТЫ
+// СЛОВАРИ (НОВОЕ: PYTHON-LIKE ДИКТЫ)
+// ========================
+KValue native_dict_create(KValue* args, int count) {
+    KValue v; v.type = VAL_DICT; v.dict = calloc(1, sizeof(KDict)); return v;
+}
+
+KValue native_dict_set(KValue* args, int count) {
+    if (args[0].type != VAL_DICT || args[1].type != VAL_STR) return make_int(0);
+    KDict* d = args[0].dict; char* k = args[1].s; KValue val = args[2];
+    for (int i=0; i<d->count; i++) {
+        if (strcmp(d->items[i].key, k) == 0) { d->items[i].val = val; return make_int(1); }
+    }
+    if (d->count >= d->capacity) {
+        d->capacity = d->capacity == 0 ? 8 : d->capacity * 2;
+        d->items = realloc(d->items, d->capacity * sizeof(KDictItem));
+    }
+    d->items[d->count].key = strdup(k);
+    d->items[d->count].val = val;
+    d->count++;
+    return make_int(1);
+}
+
+KValue native_dict_get(KValue* args, int count) {
+    if (args[0].type != VAL_DICT || args[1].type != VAL_STR) return make_str("");
+    KDict* d = args[0].dict; char* k = args[1].s;
+    for (int i=0; i<d->count; i++) {
+        if (strcmp(d->items[i].key, k) == 0) return d->items[i].val;
+    }
+    return make_str("");
+}
+
+// ========================
+// СЫРЫЕ СОКЕТЫ (НОВОЕ: СЕРВЕРЫ И КЛИЕНТЫ)
 // ========================
 KValue native_sock_create(KValue* args, int count) {
     int s = socket(AF_INET, SOCK_STREAM, 0); return make_int(s);
@@ -456,6 +436,25 @@ KValue native_sock_connect(KValue* args, int count) {
     addr.sin_family = AF_INET; addr.sin_port = htons(args[2].i);
     memcpy(&addr.sin_addr.s_addr, host->h_addr, host->h_length);
     return make_int(connect(args[0].i, (struct sockaddr*)&addr, sizeof(addr)) < 0 ? 0 : 1);
+}
+KValue native_sock_bind(KValue* args, int count) {
+    if (args[0].type != VAL_INT || args[1].type != VAL_STR || args[2].type != VAL_INT) return make_int(0);
+    struct sockaddr_in addr; memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = inet_addr(args[1].s); // "0.0.0.0" или "127.0.0.1"
+    addr.sin_port = htons(args[2].i);
+    return make_int(bind(args[0].i, (struct sockaddr*)&addr, sizeof(addr)) == 0 ? 1 : 0);
+}
+KValue native_sock_listen(KValue* args, int count) {
+    if (args[0].type != VAL_INT || args[1].type != VAL_INT) return make_int(0);
+    return make_int(listen(args[0].i, args[1].i) == 0 ? 1 : 0);
+}
+KValue native_sock_accept(KValue* args, int count) {
+    if (args[0].type != VAL_INT) return make_int(0);
+    struct sockaddr_in client_addr;
+    int client_len = sizeof(client_addr);
+    int client_sock = accept(args[0].i, (struct sockaddr*)&client_addr, (socklen_t*)&client_len);
+    return make_int(client_sock);
 }
 KValue native_sock_send(KValue* args, int count) {
     if (args[0].type == VAL_INT && args[1].type == VAL_STR)
@@ -475,151 +474,66 @@ KValue native_sock_close(KValue* args, int count) {
 }
 
 // ========================
-// HTTPS (Windows, через WinINet)
-// ИСПРАВЛЕНО: диагностика ошибок + SSL флаги
+// FFI (НОВОЕ: ПРЯМОЙ ДОСТУП К СИСТЕМЕ)
 // ========================
+typedef long long (*FFIFunc0)();
+typedef long long (*FFIFunc1)(long long);
+typedef long long (*FFIFunc2)(long long, long long);
+typedef long long (*FFIFunc3)(long long, long long, long long);
+typedef long long (*FFIFunc4)(long long, long long, long long, long long);
+typedef long long (*FFIFunc5)(long long, long long, long long, long long, long long);
+typedef long long (*FFIFunc6)(long long, long long, long long, long long, long long, long long);
+
+KValue native_api_call(KValue* args, int count) {
+    if (count < 2 || args[0].type != VAL_STR || args[1].type != VAL_STR) return make_int(0);
+    
+    void* lib = NULL;
+    void* func = NULL;
 #ifdef _WIN32
-static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, url_utf8, -1, NULL, 0);
-    wchar_t* wurl = malloc(wlen * sizeof(wchar_t));
-    MultiByteToWideChar(CP_UTF8, 0, url_utf8, -1, wurl, wlen);
-
-    HINTERNET hInternet = InternetOpenA(GLOBAL_USER_AGENT, INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
-    if (!hInternet) {
-        printf("[ОШИБКА] https: InternetOpen провалился. Код WinINet: %lu\n", GetLastError());
-        free(wurl);
-        return strdup("");
-    }
-
-    // Таймауты: 10 секунд на коннект, 15 на чтение
-    DWORD timeout_connect = 10000;
-    DWORD timeout_recv    = 15000;
-    InternetSetOption(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout_connect, sizeof(timeout_connect));
-    InternetSetOption(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout_recv,    sizeof(timeout_recv));
-
-    // ИСПРАВЛЕНО: добавлены флаги для обхода SSL-проблем
-    DWORD flags = INTERNET_FLAG_RELOAD
-                | INTERNET_FLAG_NO_CACHE_WRITE
-                | INTERNET_FLAG_NO_COOKIES
-                | INTERNET_FLAG_IGNORE_CERT_CN_INVALID
-                | INTERNET_FLAG_IGNORE_CERT_DATE_INVALID;
-    if (strncmp(url_utf8, "https://", 8) == 0) flags |= INTERNET_FLAG_SECURE;
-
-    HINTERNET hUrl  = NULL;
-    HINTERNET hConn = NULL;
-
-    if (post_data_utf8 && strlen(post_data_utf8) > 0) {
-        URL_COMPONENTSW uc; memset(&uc, 0, sizeof(uc));
-        uc.dwStructSize = sizeof(uc);
-        wchar_t whost[512]; wchar_t wpath[2048];
-        uc.lpszHostName = whost; uc.dwHostNameLength = 512;
-        uc.lpszUrlPath  = wpath; uc.dwUrlPathLength  = 2048;
-        InternetCrackUrlW(wurl, 0, 0, &uc);
-
-        hConn = InternetConnectW(hInternet, whost, uc.nPort, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
-        if (!hConn) {
-            printf("[ОШИБКА] https POST: InternetConnect провалился. Код: %lu\n", GetLastError());
-            InternetCloseHandle(hInternet);
-            free(wurl);
-            return strdup("");
-        }
-
-        DWORD req_flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_IGNORE_CERT_CN_INVALID
-                | INTERNET_FLAG_IGNORE_CERT_DATE_INVALID;
-        if (uc.nScheme == INTERNET_SCHEME_HTTPS) req_flags |= INTERNET_FLAG_SECURE;
-
-        HINTERNET hReq = HttpOpenRequestW(hConn, L"POST", wpath, NULL, NULL, NULL, req_flags, 0);
-        if (!hReq) {
-            printf("[ОШИБКА] https POST: HttpOpenRequest провалился. Код: %lu\n", GetLastError());
-            InternetCloseHandle(hConn);
-            InternetCloseHandle(hInternet);
-            free(wurl);
-            return strdup("");
-        }
-
-        // Снимаем проверку SSL-сертификата на уровне запроса тоже
-        DWORD sec_flags;
-        DWORD sec_flags_size = sizeof(sec_flags);
-        InternetQueryOption(hReq, INTERNET_OPTION_SECURITY_FLAGS, &sec_flags, &sec_flags_size);
-        sec_flags |= SECURITY_FLAG_IGNORE_UNKNOWN_CA
-                  |  SECURITY_FLAG_IGNORE_CERT_DATE_INVALID
-                  |  SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
-        InternetSetOption(hReq, INTERNET_OPTION_SECURITY_FLAGS, &sec_flags, sizeof(sec_flags));
-
-        char full_headers[8192];
-        snprintf(full_headers, sizeof(full_headers),
-            "Content-Type: application/x-www-form-urlencoded\r\n%s%s%s",
-            GLOBAL_HEADERS,
-            strlen(GLOBAL_COOKIES) ? "Cookie: " : "",
-            strlen(GLOBAL_COOKIES) ? GLOBAL_COOKIES : "");
-
-        BOOL ok = HttpSendRequestA(hReq, full_headers, (DWORD)strlen(full_headers),
-            (void*)post_data_utf8, (DWORD)strlen(post_data_utf8));
-        if (!ok) {
-            printf("[ОШИБКА] https POST: HttpSendRequest провалился. Код: %lu\n", GetLastError());
-            InternetCloseHandle(hReq);
-            InternetCloseHandle(hConn);
-            InternetCloseHandle(hInternet);
-            free(wurl);
-            return strdup("");
-        }
-        hUrl = hReq;
-    } else {
-        char headers[8192];
-        snprintf(headers, sizeof(headers), "%s%s%s",
-            GLOBAL_HEADERS,
-            strlen(GLOBAL_COOKIES) ? "Cookie: " : "",
-            strlen(GLOBAL_COOKIES) ? GLOBAL_COOKIES : "");
-
-        int wlenH = MultiByteToWideChar(CP_UTF8, 0, headers, -1, NULL, 0);
-        wchar_t* wh = malloc(wlenH * sizeof(wchar_t));
-        MultiByteToWideChar(CP_UTF8, 0, headers, -1, wh, wlenH);
-        hUrl = InternetOpenUrlW(hInternet, wurl, wh, (DWORD)wcslen(wh), flags, 0);
-        free(wh);
-
-        if (!hUrl) {
-            DWORD err = GetLastError();
-            printf("[ОШИБКА] https GET: InternetOpenUrl провалился. Код WinINet: %lu\n", err);
-            // Расшифровка частых кодов
-            if (err == 12007) printf("         (12007 = имя хоста не резолвится — нет интернета или DNS)\n");
-            if (err == 12029) printf("         (12029 = нет соединения с сервером)\n");
-            if (err == 12175) printf("         (12175 = ошибка SSL — попробуйте обновить Windows)\n");
-            if (err == 12057) printf("         (12057 = отозванный сертификат)\n");
-            InternetCloseHandle(hInternet);
-            free(wurl);
-            return strdup("");
-        }
-    }
-    free(wurl);
-
-    char* result = malloc(1); result[0] = '\0'; int total = 0;
-    char buf[8192]; DWORD read;
-    while (InternetReadFile(hUrl, buf, sizeof(buf) - 1, &read) && read > 0) {
-        result = realloc(result, total + read + 1);
-        memcpy(result + total, buf, read);
-        total += read; result[total] = '\0';
-    }
-    InternetCloseHandle(hUrl);
-    if (hConn) InternetCloseHandle(hConn);
-    InternetCloseHandle(hInternet);
-    return result;
-}
-
-KValue native_https_get(KValue* args, int count) {
-    if (args[0].type != VAL_STR) return make_str("");
-    char* r = wininet_request(args[0].s, NULL);
-    KValue v = make_str(r); free(r); return v;
-}
-KValue native_https_post(KValue* args, int count) {
-    if (args[0].type != VAL_STR) return make_str("");
-    const char* body = (count > 1 && args[1].type == VAL_STR) ? args[1].s : "";
-    char* r = wininet_request(args[0].s, body);
-    KValue v = make_str(r); free(r); return v;
-}
+    lib = LoadLibraryA(args[0].s);
+    if (lib) func = GetProcAddress((HMODULE)lib, args[1].s);
 #else
-KValue native_https_get(KValue* args, int count)  { printf("[ОШИБКА] https_гет пока поддерживается только на Windows.\n"); return make_str(""); }
-KValue native_https_post(KValue* args, int count) { printf("[ОШИБКА] https_пост пока поддерживается только на Windows.\n"); return make_str(""); }
+    lib = dlopen(args[0].s, RTLD_LAZY);
+    if (lib) func = dlsym(lib, args[1].s);
 #endif
+
+    if (!func) return make_int(0); 
+
+    long long a[6] = {0, 0, 0, 0, 0, 0};
+    for (int i = 0; i < 6 && (i + 2) < count; i++) {
+        if (args[i+2].type == VAL_INT) a[i] = args[i+2].i;
+        else if (args[i+2].type == VAL_STR) a[i] = (long long)(intptr_t)args[i+2].s;
+    }
+
+    long long res = 0;
+    int arg_cnt = count - 2;
+    if (arg_cnt == 0) res = ((FFIFunc0)func)();
+    else if (arg_cnt == 1) res = ((FFIFunc1)func)(a[0]);
+    else if (arg_cnt == 2) res = ((FFIFunc2)func)(a[0], a[1]);
+    else if (arg_cnt == 3) res = ((FFIFunc3)func)(a[0], a[1], a[2]);
+    else if (arg_cnt == 4) res = ((FFIFunc4)func)(a[0], a[1], a[2], a[3]);
+    else if (arg_cnt == 5) res = ((FFIFunc5)func)(a[0], a[1], a[2], a[3], a[4]);
+    else res = ((FFIFunc6)func)(a[0], a[1], a[2], a[3], a[4], a[5]);
+
+    return make_int(res);
+}
+
+KValue native_mem_alloc(KValue* args, int count) {
+    return make_int((long long)(intptr_t)calloc(1, args[0].i));
+}
+KValue native_mem_free(KValue* args, int count) {
+    free((void*)(intptr_t)args[0].i); return make_int(0);
+}
+KValue native_mem_read_str(KValue* args, int count) {
+    char* ptr = (char*)(intptr_t)args[0].i;
+    return ptr ? make_str(ptr) : make_str("");
+}
+KValue native_mem_write_str(KValue* args, int count) {
+    if(args[0].type == VAL_INT && args[1].type == VAL_STR) {
+        strcpy((char*)(intptr_t)args[0].i, args[1].s);
+    }
+    return make_int(0);
+}
 
 // ========================
 // РЕГИСТРАЦИЯ ФУНКЦИЙ
@@ -770,6 +684,15 @@ void print_val(KValue v) {
         for (int i = 0; i < v.arr->length; i++) { print_val(v.arr->items[i]); if (i < v.arr->length-1) printf(", "); }
         printf("]");
     }
+    else if (v.type == VAL_DICT) {
+        printf("{");
+        for (int i = 0; i < v.dict->count; i++) {
+            printf("\"%s\": ", v.dict->items[i].key);
+            print_val(v.dict->items[i].val);
+            if (i < v.dict->count - 1) printf(", ");
+        }
+        printf("}");
+    }
 }
 
 void execute(ASTNode* node) {
@@ -779,8 +702,14 @@ void execute(ASTNode* node) {
 #ifdef _WIN32
             WSADATA wsaData; WSAStartup(MAKEWORD(2, 2), &wsaData);
 #endif
+            // ОСНОВНЫЕ
             register_native("ввод",                    native_vvod);
             register_native("длина",                   native_len);
+            register_native("ос_команда",              native_os_cmd);
+            register_native("ос_чтение",               native_os_read);
+            register_native("ос_запись",               native_os_write);
+            
+            // МАТЕМАТИКА
             register_native("корень",                  native_sqrt);
             register_native("абс",                     native_abs);
             register_native("пол",                     native_floor_f);
@@ -790,9 +719,8 @@ void execute(ASTNode* node) {
             register_native("косинус",                 native_cos_f);
             register_native("степень",                 native_pow_f);
             register_native("число_в_строку",          native_num_to_str);
-            register_native("ос_команда",              native_os_cmd);
-            register_native("ос_чтение",               native_os_read);
-            register_native("ос_запись",               native_os_write);
+            
+            // СТРОКИ
             register_native("строка_найти",            native_str_find);
             register_native("строка_срез",             native_str_sub);
             register_native("строка_в_число",          native_str_to_int);
@@ -800,22 +728,34 @@ void execute(ASTNode* node) {
             register_native("строка_верхний",          native_str_upper);
             register_native("строка_нижний",           native_str_lower);
             register_native("урл_кодировать",          native_url_encode);
+            
+            // JSON
             register_native("json_получить",           native_json_get);
             register_native("json_объект",             native_json_get_obj);
             register_native("json_элемент",            native_json_arr_get);
             register_native("json_длина",              native_json_arr_len);
+            
+            // СЛОВАРИ
+            register_native("словарь",                 native_dict_create);
+            register_native("сл_записать",             native_dict_set);
+            register_native("сл_читать",               native_dict_get);
+
+            // СЫРЫЕ СОКЕТЫ (ЯДРО ИНТЕРНЕТА)
             register_native("сокет_создать",           native_sock_create);
             register_native("сокет_подключить",        native_sock_connect);
+            register_native("сокет_бинд",              native_sock_bind);
+            register_native("сокет_слушать",           native_sock_listen);
+            register_native("сокет_принять",           native_sock_accept);
             register_native("сокет_отправить",         native_sock_send);
             register_native("сокет_получить",          native_sock_recv);
             register_native("сокет_закрыть",           native_sock_close);
-            register_native("https_гет",               native_https_get);
-            register_native("https_пост",              native_https_post);
-            register_native("инет_юзерагент",          native_set_useragent);
-            register_native("инет_заголовок",          native_add_header);
-            register_native("инет_очистить_заголовки", native_clear_headers);
-            register_native("инет_куки",               native_add_cookie);
-            register_native("инет_очистить_куки",      native_clear_cookies);
+
+            // FFI (ЯДРО ДОСТУПА К СИСТЕМЕ И ПАМЯТИ)
+            register_native("апи_вызов",               native_api_call);
+            register_native("память_выделить",         native_mem_alloc);
+            register_native("память_освободить",       native_mem_free);
+            register_native("память_в_строку",         native_mem_read_str);
+            register_native("строку_в_память",         native_mem_write_str);
 
             for (int i = 0; i < node->children_count; i++) {
                 if (node->children[i]->type == AST_FUNC_DEF) {
