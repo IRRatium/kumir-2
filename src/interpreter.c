@@ -279,6 +279,44 @@ KValue native_url_encode(KValue* args, int count) {
     KValue v = make_str(out); free(out); return v;
 }
 
+
+// ========================
+// UTF-8 хелпер для JSON
+// ========================
+static int unicode_to_utf8(unsigned int cp, char* out) {
+    if (cp < 0x80)   { out[0] = (char)cp; return 1; }
+    if (cp < 0x800)  { out[0] = (char)(0xC0|(cp>>6)); out[1] = (char)(0x80|(cp&0x3F)); return 2; }
+    out[0] = (char)(0xE0|(cp>>12)); out[1] = (char)(0x80|((cp>>6)&0x3F)); out[2] = (char)(0x80|(cp&0x3F)); return 3;
+}
+
+// Разбор JSON-строки начиная с символа после открывающей кавычки.
+// Записывает результат в buf (размер buf_size), возвращает указатель на закрывающую кавычку.
+static const char* json_parse_str(const char* pos, char* buf, int buf_size) {
+    int i = 0;
+    while (*pos && *pos != '"') {
+        if (i >= buf_size - 4) { pos++; continue; }
+        if (*pos == '\\') {
+            pos++;
+            if      (*pos == 'n')  { buf[i++] = '\n'; pos++; }
+            else if (*pos == 'r')  { buf[i++] = '\r'; pos++; }
+            else if (*pos == 't')  { buf[i++] = '\t'; pos++; }
+            else if (*pos == '"')  { buf[i++] = '"';  pos++; }
+            else if (*pos == '\\') { buf[i++] = '\\'; pos++; }
+            else if (*pos == 'u')  {
+                pos++;
+                char hex[5] = {0};
+                for (int k = 0; k < 4 && *pos; k++, pos++) hex[k] = *pos;
+                unsigned int cp = (unsigned int)strtol(hex, NULL, 16);
+                char utf8[4];
+                int n = unicode_to_utf8(cp, utf8);
+                for (int k = 0; k < n; k++) buf[i++] = utf8[k];
+            } else { buf[i++] = *pos; pos++; }
+        } else { buf[i++] = *pos++; }
+    }
+    buf[i] = '\0';
+    return pos;
+}
+
 // ========================
 // JSON ПАРСЕР
 // ========================
@@ -292,19 +330,9 @@ KValue native_json_get(KValue* args, int count) {
     while (*pos == ' ' || *pos == '\t') pos++;
     if (*pos == '"') {
         pos++;
-        char buf[65536]; int i = 0;
-        while (*pos && *pos != '"') {
-            if (*pos == '\\') {
-                pos++;
-                if (*pos == 'n')      buf[i++] = '\n';
-                else if (*pos == 'r') buf[i++] = '\r';
-                else if (*pos == 't') buf[i++] = '\t';
-                else                  buf[i++] = *pos;
-            } else buf[i++] = *pos;
-            pos++;
-            if (i >= 65534) break;
-        }
-        buf[i] = '\0'; return make_str(buf);
+        char buf[65536];
+        pos = json_parse_str(pos, buf, sizeof(buf));
+        return make_str(buf);
     }
     if (*pos == '-' || (*pos >= '0' && *pos <= '9')) return make_int(atoi(pos));
     if (strncmp(pos, "true",  4) == 0) return make_int(1);
@@ -364,12 +392,16 @@ KValue native_json_arr_get(KValue* args, int count) {
                 }
             }
         } else if (*pos == '"') {
-            pos++; char* start2 = pos;
-            while (*pos && *pos != '"') pos++;
+            pos++;
             if (cur == n) {
-                int len = (int)(pos - start2);
-                char* buf = malloc(len + 1); strncpy(buf, start2, len); buf[len] = '\0';
-                KValue v = make_str(buf); free(buf); if (*pos) pos++; return v;
+                char buf[65536];
+                pos = json_parse_str(pos, buf, sizeof(buf));
+                if (*pos == '"') pos++;
+                return make_str(buf);
+            }
+            // не наш элемент — пропускаем строку
+            while (*pos && *pos != '"') {
+                if (*pos == '\\') { pos++; if (*pos) pos++; } else pos++;
             }
             if (*pos) pos++;
         } else {
