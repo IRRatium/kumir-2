@@ -17,7 +17,7 @@ typedef enum {
     TOKEN_IDENTIFIER, TOKEN_NUMBER, TOKEN_FLOAT_LIT, TOKEN_STRING,
     TOKEN_ASSIGN, TOKEN_PLUS, TOKEN_MINUS, TOKEN_MUL, TOKEN_DIV, TOKEN_MOD,
     TOKEN_EQ, TOKEN_NEQ, TOKEN_LT, TOKEN_GT, TOKEN_LE, TOKEN_GE,
-    TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_COMMA, 
+    TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_COMMA,
     TOKEN_EOF, TOKEN_UNKNOWN
 } KTokenType;
 
@@ -26,7 +26,7 @@ typedef struct {
 } Token;
 
 // ========================
-// ДАННЫЕ (Массивы, Строки)
+// ДАННЫЕ
 // ========================
 typedef enum { VAL_INT, VAL_FLOAT, VAL_STR, VAL_ARRAY } ValType;
 
@@ -34,7 +34,7 @@ struct KArray;
 
 typedef struct {
     ValType type;
-    int i;
+    long long i;   // ИСПРАВЛЕНО: long long вместо int — поддержка больших чисел
     double f;
     char* s;
     struct KArray* arr;
@@ -60,7 +60,7 @@ typedef enum {
 typedef struct ASTNode {
     ASTNodeType type;
     char* string_value;
-    int int_value;
+    long long int_value;   // ИСПРАВЛЕНО: long long
     double float_value;
     int line;
     struct ASTNode* left;
@@ -76,7 +76,7 @@ void execute(ASTNode* node);
 void parse_error(int line, const char* msg, const char* detail);
 void runtime_error(int line, const char* msg, const char* detail);
 
-KValue make_int(int v);
+KValue make_int(long long v);   // ИСПРАВЛЕНО: long long
 KValue make_float(double v);
 KValue make_str(const char* v);
 KValue make_array(int size);
