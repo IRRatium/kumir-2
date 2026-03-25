@@ -51,7 +51,6 @@ Token get_next_token(const char** source, int* line) {
         token.value = kumir_strndup(start, *source - start); return token;
     }
 
-    // НОВАЯ ОБРАБОТКА СТРОК (с поддержкой \r \n \t \")
     if (**source == '"') {
         (*source)++;
         int cap = 256; 
