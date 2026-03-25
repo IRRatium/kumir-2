@@ -24,7 +24,6 @@ static ASTNode* parse_statement();
 static ASTNode* parse_factor() {
     ASTNode* node = NULL;
 
-    // ИСПРАВЛЕНО: унарный минус
     if (current_token.type == TOKEN_MINUS) {
         advance();
         ASTNode* inner = parse_factor();
@@ -37,7 +36,6 @@ static ASTNode* parse_factor() {
         return neg;
     }
 
-    // ИСПРАВЛЕНО: оператор "не" теперь корректно обрабатывается
     if (current_token.type == TOKEN_NOT) {
         advance();
         ASTNode* inner = parse_factor();
@@ -48,7 +46,12 @@ static ASTNode* parse_factor() {
         return not_node;
     }
 
-    if (current_token.type == TOKEN_NUMBER) { node = create_node(AST_NUM); node->int_value = atoi(current_token.value); advance(); }
+    // ИСПРАВЛЕНО: atoll вместо atoi — поддержка больших чисел
+    if (current_token.type == TOKEN_NUMBER) {
+        node = create_node(AST_NUM);
+        node->int_value = atoll(current_token.value);
+        advance();
+    }
     else if (current_token.type == TOKEN_FLOAT_LIT) { node = create_node(AST_FLOAT); node->float_value = atof(current_token.value); advance(); }
     else if (current_token.type == TOKEN_DA || current_token.type == TOKEN_NET) { node = create_node(AST_NUM); node->int_value = (current_token.type == TOKEN_DA) ? 1 : 0; advance(); }
     else if (current_token.type == TOKEN_STRING) { node = create_node(AST_STR); node->string_value = current_token.value; advance(); }
@@ -81,7 +84,6 @@ static ASTNode* parse_factor() {
         advance();
     } else parse_error(current_token.line, "Неизвестный символ", current_token.value);
 
-    // Поддержка индексов массивов: a[0][1]
     while (node && current_token.type == TOKEN_LBRACKET) {
         advance(); ASTNode* idx = create_node(AST_INDEX_ACCESS);
         idx->left = node; idx->right = parse_expr();
@@ -192,7 +194,7 @@ static ASTNode* parse_func_def() {
     if (current_token.type == TOKEN_LPAREN) {
         advance();
         while (current_token.type != TOKEN_RPAREN && current_token.type != TOKEN_EOF) {
-            advance(); // пропускаем тип аргумента
+            advance();
             ASTNode* param = create_node(AST_PARAM); param->string_value = current_token.value;
             add_child(func, param); advance();
             if (current_token.type == TOKEN_COMMA) advance();
@@ -210,19 +212,16 @@ ASTNode* parse(const char* source) {
     ASTNode* program = create_node(AST_PROGRAM);
 
     while (current_token.type != TOKEN_EOF) {
-        // СТАЛО:
         if (current_token.type == TOKEN_ISPOLZOVAT) {
-        int err_line = current_line;
-        advance();
-        char libname[256]; strcpy(libname, current_token.value);
-        advance();
-        // Если следующий токен — точка (TOKEN_UNKNOWN), пропускаем ".kum"
-        if (current_token.type == TOKEN_UNKNOWN) {
-            advance(); // пропускаем '.'
-            if (current_token.type == TOKEN_IDENTIFIER) advance(); // пропускаем 'kum'
-        }
-        // Добавляем .kum если расширения нет
-        if (!strstr(libname, ".")) strcat(libname, ".kum");
+            int err_line = current_line;
+            advance();
+            char libname[256]; strcpy(libname, current_token.value);
+            advance();
+            if (current_token.type == TOKEN_UNKNOWN) {
+                advance();
+                if (current_token.type == TOKEN_IDENTIFIER) advance();
+            }
+            if (!strstr(libname, ".")) strcat(libname, ".kum");
 
             char* lib_source = read_file_content(libname);
             if (lib_source) {
