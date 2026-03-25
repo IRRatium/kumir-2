@@ -17,7 +17,7 @@
 // ========================
 // ЗНАЧЕНИЯ
 // ========================
-KValue make_int(int v)    { KValue val; val.type = VAL_INT;   val.i = v;   val.f = 0.0; val.s = NULL; val.arr = NULL; return val; }
+KValue make_int(long long v) { KValue val; val.type = VAL_INT;   val.i = v;   val.f = 0.0; val.s = NULL; val.arr = NULL; return val; }
 KValue make_float(double v){ KValue val; val.type = VAL_FLOAT; val.i = 0;   val.f = v;   val.s = NULL; val.arr = NULL; return val; }
 KValue make_str(const char* v) { KValue val; val.type = VAL_STR; val.s = strdup(v ? v : ""); val.arr = NULL; return val; }
 KValue make_array(int size) {
@@ -142,7 +142,7 @@ KValue native_sqrt(KValue* args, int count) {
 }
 KValue native_abs(KValue* args, int count) {
     if (args[0].type == VAL_FLOAT) return make_float(fabs(args[0].f));
-    return make_int(abs(args[0].i));
+    return make_int(llabs(args[0].i));
 }
 KValue native_floor_f(KValue* args, int count) {
     double v = (args[0].type == VAL_FLOAT) ? args[0].f : (double)args[0].i;
@@ -172,7 +172,7 @@ KValue native_pow_f(KValue* args, int count) {
 KValue native_num_to_str(KValue* args, int count) {
     char buf[64];
     if (args[0].type == VAL_FLOAT) snprintf(buf, sizeof(buf), "%g", args[0].f);
-    else                           snprintf(buf, sizeof(buf), "%d", args[0].i);
+    else                           snprintf(buf, sizeof(buf), "%lld", args[0].i);
     return make_str(buf);
 }
 
@@ -196,7 +196,7 @@ KValue native_str_sub(KValue* args, int count) {
 }
 KValue native_str_to_int(KValue* args, int count) {
     if (args[0].type != VAL_STR) return make_int(0);
-    return make_int(atoi(args[0].s));
+    return make_int(atoll(args[0].s));
 }
 KValue native_str_replace(KValue* args, int count) {
     if (args[0].type != VAL_STR || args[1].type != VAL_STR || args[2].type != VAL_STR) return make_str("");
@@ -334,7 +334,7 @@ KValue native_json_get(KValue* args, int count) {
         pos = json_parse_str(pos, buf, sizeof(buf));
         return make_str(buf);
     }
-    if (*pos == '-' || (*pos >= '0' && *pos <= '9')) return make_int(atoi(pos));
+    if (*pos == '-' || (*pos >= '0' && *pos <= '9')) return make_int(atoll(pos));
     if (strncmp(pos, "true",  4) == 0) return make_int(1);
     if (strncmp(pos, "false", 5) == 0) return make_int(0);
     if (strncmp(pos, "null",  4) == 0) return make_str("");
@@ -410,7 +410,7 @@ KValue native_json_arr_get(KValue* args, int count) {
             if (cur == n) {
                 int len = (int)(pos - start3);
                 char* buf = malloc(len + 1); strncpy(buf, start3, len); buf[len] = '\0';
-                KValue v = make_int(atoi(buf)); free(buf); return v;
+                KValue v = make_int(atoll(buf)); free(buf); return v;
             }
         }
         cur++;
@@ -723,10 +723,10 @@ static KValue eval(ASTNode* node) {
                 const char *ls, *rs;
                 if (l.type == VAL_STR)        ls = l.s;
                 else if (l.type == VAL_FLOAT) { snprintf(tmp_l, sizeof(tmp_l), "%g", l.f); ls = tmp_l; }
-                else                          { snprintf(tmp_l, sizeof(tmp_l), "%d", l.i); ls = tmp_l; }
+                else                          { snprintf(tmp_l, sizeof(tmp_l), "%lld", l.i); ls = tmp_l; }
                 if (r.type == VAL_STR)        rs = r.s;
                 else if (r.type == VAL_FLOAT) { snprintf(tmp_r, sizeof(tmp_r), "%g", r.f); rs = tmp_r; }
-                else                          { snprintf(tmp_r, sizeof(tmp_r), "%d", r.i); rs = tmp_r; }
+                else                          { snprintf(tmp_r, sizeof(tmp_r), "%lld", r.i); rs = tmp_r; }
                 size_t total = strlen(ls) + strlen(rs) + 1;
                 char* buf = malloc(total);
                 snprintf(buf, total, "%s%s", ls, rs);
@@ -762,7 +762,7 @@ static KValue eval(ASTNode* node) {
 }
 
 void print_val(KValue v) {
-    if      (v.type == VAL_INT)   printf("%d", v.i);
+    if      (v.type == VAL_INT)   printf("%lld", v.i);
     else if (v.type == VAL_FLOAT) printf("%g", v.f);
     else if (v.type == VAL_STR)   printf("%s", v.s);
     else if (v.type == VAL_ARRAY) {
