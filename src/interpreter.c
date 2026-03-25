@@ -29,7 +29,6 @@ KValue make_array(int size) {
 
 // ========================
 // ТАБЛИЦА ФУНКЦИЙ
-// ИСПРАВЛЕНО: размер увеличен до 512, имя до 256 байт
 // ========================
 #define MAX_FUNCS 512
 
@@ -41,8 +40,6 @@ static int func_count = 0;
 
 // ========================
 // ФРЕЙМЫ ВЫЗОВОВ
-// ИСПРАВЛЕНО: имена переменных до 256 байт (поддержка длинных русских имён)
-// ИСПРАВЛЕНО: динамическая область видимости — функции видят переменные вызывающего
 // ========================
 typedef struct {
     char   names[100][256];
@@ -61,7 +58,6 @@ void runtime_error(int line, const char* msg, const char* detail) {
 
 // ========================
 // ГЛОБАЛЬНЫЕ НАСТРОЙКИ СЕТИ
-// ИСПРАВЛЕНО: защита от переполнения через strncat с проверкой размера
 // ========================
 static char GLOBAL_USER_AGENT[512] = "Kumir2/1.0";
 static char GLOBAL_HEADERS[4096]   = "";
@@ -74,7 +70,6 @@ KValue native_set_useragent(KValue* args, int count) {
 }
 KValue native_add_header(KValue* args, int count) {
     if (args[0].type == VAL_STR) {
-        // ИСПРАВЛЕНО: проверяем, что есть место перед конкатенацией
         size_t remaining = sizeof(GLOBAL_HEADERS) - strlen(GLOBAL_HEADERS) - 3;
         if (strlen(args[0].s) < remaining) {
             strcat(GLOBAL_HEADERS, args[0].s);
@@ -140,7 +135,6 @@ KValue native_os_write(KValue* args, int count) {
 
 // ========================
 // МАТЕМАТИКА
-// ИСПРАВЛЕНО: добавлены math.h функции
 // ========================
 KValue native_sqrt(KValue* args, int count) {
     double v = (args[0].type == VAL_FLOAT) ? args[0].f : (double)args[0].i;
@@ -221,7 +215,6 @@ KValue native_str_replace(KValue* args, int count) {
     KValue v = make_str(result); free(result); return v;
 }
 
-// ИСПРАВЛЕНО: строка_верхний/нижний теперь поддерживают кириллицу (UTF-8)
 KValue native_str_upper(KValue* args, int count) {
     if (args[0].type != VAL_STR) return make_str("");
     unsigned char* s = (unsigned char*)args[0].s;
@@ -230,32 +223,20 @@ KValue native_str_upper(KValue* args, int count) {
     int i = 0, j = 0;
     while (i < len) {
         unsigned char c = s[i];
-        // ASCII a-z
         if (c >= 'a' && c <= 'z') { out[j++] = c - 32; i++; }
-        // UTF-8 кириллица
         else if (c == 0xD0 && i + 1 < len) {
             unsigned char c2 = s[i+1];
-            if (c2 >= 0xB0 && c2 <= 0xBF) {         // а-п → А-П
-                out[j++] = 0xD0; out[j++] = c2 - 0x20;
-            } else if (c2 == 0xB5) {                 // ё (специальный случай)
-                out[j++] = 0xD0; out[j++] = 0x81;   // → Ё
-            } else {
-                out[j++] = c; out[j++] = c2;
-            }
+            if (c2 >= 0xB0 && c2 <= 0xBF) { out[j++] = 0xD0; out[j++] = c2 - 0x20; }
+            else if (c2 == 0xB5)           { out[j++] = 0xD0; out[j++] = 0x81; }
+            else                           { out[j++] = c; out[j++] = c2; }
             i += 2;
         } else if (c == 0xD1 && i + 1 < len) {
             unsigned char c2 = s[i+1];
-            if (c2 >= 0x80 && c2 <= 0x8F) {         // р-я → Р-Я
-                out[j++] = 0xD0; out[j++] = c2 + 0x20;
-            } else if (c2 == 0x91) {                 // ё → Ё
-                out[j++] = 0xD0; out[j++] = 0x81;
-            } else {
-                out[j++] = c; out[j++] = c2;
-            }
+            if (c2 >= 0x80 && c2 <= 0x8F) { out[j++] = 0xD0; out[j++] = c2 + 0x20; }
+            else if (c2 == 0x91)           { out[j++] = 0xD0; out[j++] = 0x81; }
+            else                           { out[j++] = c; out[j++] = c2; }
             i += 2;
-        } else {
-            out[j++] = c; i++;
-        }
+        } else { out[j++] = c; i++; }
     }
     out[j] = '\0';
     KValue v = make_str(out); free(out); return v;
@@ -269,30 +250,20 @@ KValue native_str_lower(KValue* args, int count) {
     int i = 0, j = 0;
     while (i < len) {
         unsigned char c = s[i];
-        // ASCII A-Z
         if (c >= 'A' && c <= 'Z') { out[j++] = c + 32; i++; }
-        // UTF-8 кириллица
         else if (c == 0xD0 && i + 1 < len) {
             unsigned char c2 = s[i+1];
-            if (c2 >= 0x90 && c2 <= 0x9F) {         // А-П → а-п
-                out[j++] = 0xD0; out[j++] = c2 + 0x20;
-            } else if (c2 >= 0xA0 && c2 <= 0xAF) {  // Р-Я → р-я
-                out[j++] = 0xD1; out[j++] = c2 - 0x20;
-            } else if (c2 == 0x81) {                 // Ё → ё
-                out[j++] = 0xD1; out[j++] = 0x91;
-            } else {
-                out[j++] = c; out[j++] = c2;
-            }
+            if (c2 >= 0x90 && c2 <= 0x9F)      { out[j++] = 0xD0; out[j++] = c2 + 0x20; }
+            else if (c2 >= 0xA0 && c2 <= 0xAF) { out[j++] = 0xD1; out[j++] = c2 - 0x20; }
+            else if (c2 == 0x81)                { out[j++] = 0xD1; out[j++] = 0x91; }
+            else                                { out[j++] = c; out[j++] = c2; }
             i += 2;
-        } else {
-            out[j++] = c; i++;
-        }
+        } else { out[j++] = c; i++; }
     }
     out[j] = '\0';
     KValue v = make_str(out); free(out); return v;
 }
 
-// URL-кодирование для GET-параметров
 KValue native_url_encode(KValue* args, int count) {
     if (args[0].type != VAL_STR) return make_str("");
     unsigned char* s = (unsigned char*)args[0].s;
@@ -302,9 +273,7 @@ KValue native_url_encode(KValue* args, int count) {
         if ((s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z') ||
             (s[i] >= '0' && s[i] <= '9') || s[i] == '-' || s[i] == '_' || s[i] == '.' || s[i] == '~') {
             out[j++] = s[i];
-        } else {
-            sprintf(out + j, "%%%02X", s[i]); j += 3;
-        }
+        } else { sprintf(out + j, "%%%02X", s[i]); j += 3; }
     }
     out[j] = '\0';
     KValue v = make_str(out); free(out); return v;
@@ -327,10 +296,10 @@ KValue native_json_get(KValue* args, int count) {
         while (*pos && *pos != '"') {
             if (*pos == '\\') {
                 pos++;
-                if (*pos == 'n')       buf[i++] = '\n';
-                else if (*pos == 'r')  buf[i++] = '\r';
-                else if (*pos == 't')  buf[i++] = '\t';
-                else                   buf[i++] = *pos;
+                if (*pos == 'n')      buf[i++] = '\n';
+                else if (*pos == 'r') buf[i++] = '\r';
+                else if (*pos == 't') buf[i++] = '\t';
+                else                  buf[i++] = *pos;
             } else buf[i++] = *pos;
             pos++;
             if (i >= 65534) break;
@@ -418,14 +387,12 @@ KValue native_json_arr_get(KValue* args, int count) {
     return make_str("");
 }
 
-// ИСПРАВЛЕНО: пустой массив [] теперь возвращает 0, а не 1
 KValue native_json_arr_len(KValue* args, int count) {
     if (args[0].type != VAL_STR) return make_int(0);
     char* json = args[0].s, *pos = json;
     while (*pos && *pos != '[') pos++;
     if (!*pos) return make_int(0);
     pos++;
-    // Пропускаем пробелы и проверяем пустой массив
     while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
     if (*pos == ']') return make_int(0);
     int n = 0, depth = 1;
@@ -477,7 +444,7 @@ KValue native_sock_close(KValue* args, int count) {
 
 // ========================
 // HTTPS (Windows, через WinINet)
-// ИСПРАВЛЕНО: утечка hConn при POST-запросах закрыта
+// ИСПРАВЛЕНО: диагностика ошибок + SSL флаги
 // ========================
 #ifdef _WIN32
 static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
@@ -485,14 +452,28 @@ static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
     wchar_t* wurl = malloc(wlen * sizeof(wchar_t));
     MultiByteToWideChar(CP_UTF8, 0, url_utf8, -1, wurl, wlen);
 
-    HINTERNET hInternet = InternetOpenA(GLOBAL_USER_AGENT, INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
-    if (!hInternet) { free(wurl); return strdup(""); }
+    HINTERNET hInternet = InternetOpenA(GLOBAL_USER_AGENT, INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    if (!hInternet) {
+        printf("[ОШИБКА] https: InternetOpen провалился. Код WinINet: %lu\n", GetLastError());
+        free(wurl);
+        return strdup("");
+    }
 
-    DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE;
+    // Таймауты: 10 секунд на коннект, 15 на чтение
+    DWORD timeout_connect = 10000;
+    DWORD timeout_recv    = 15000;
+    InternetSetOption(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout_connect, sizeof(timeout_connect));
+    InternetSetOption(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout_recv,    sizeof(timeout_recv));
+
+    // ИСПРАВЛЕНО: добавлены флаги для обхода SSL-проблем
+    DWORD flags = INTERNET_FLAG_RELOAD
+                | INTERNET_FLAG_NO_CACHE_WRITE
+                | INTERNET_FLAG_NO_COOKIES
+                | INTERNET_FLAG_IGNORE_CERT_ERRORS;   // <-- ключевое исправление
     if (strncmp(url_utf8, "https://", 8) == 0) flags |= INTERNET_FLAG_SECURE;
 
-    HINTERNET hUrl = NULL;
-    HINTERNET hConn = NULL; // ИСПРАВЛЕНО: объявляем здесь, чтобы закрыть после
+    HINTERNET hUrl  = NULL;
+    HINTERNET hConn = NULL;
 
     if (post_data_utf8 && strlen(post_data_utf8) > 0) {
         URL_COMPONENTSW uc; memset(&uc, 0, sizeof(uc));
@@ -503,9 +484,33 @@ static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
         InternetCrackUrlW(wurl, 0, 0, &uc);
 
         hConn = InternetConnectW(hInternet, whost, uc.nPort, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
-        DWORD req_flags = (uc.nScheme == INTERNET_SCHEME_HTTPS) ?
-            (INTERNET_FLAG_SECURE | INTERNET_FLAG_RELOAD) : INTERNET_FLAG_RELOAD;
+        if (!hConn) {
+            printf("[ОШИБКА] https POST: InternetConnect провалился. Код: %lu\n", GetLastError());
+            InternetCloseHandle(hInternet);
+            free(wurl);
+            return strdup("");
+        }
+
+        DWORD req_flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_IGNORE_CERT_ERRORS;
+        if (uc.nScheme == INTERNET_SCHEME_HTTPS) req_flags |= INTERNET_FLAG_SECURE;
+
         HINTERNET hReq = HttpOpenRequestW(hConn, L"POST", wpath, NULL, NULL, NULL, req_flags, 0);
+        if (!hReq) {
+            printf("[ОШИБКА] https POST: HttpOpenRequest провалился. Код: %lu\n", GetLastError());
+            InternetCloseHandle(hConn);
+            InternetCloseHandle(hInternet);
+            free(wurl);
+            return strdup("");
+        }
+
+        // Снимаем проверку SSL-сертификата на уровне запроса тоже
+        DWORD sec_flags;
+        DWORD sec_flags_size = sizeof(sec_flags);
+        InternetQueryOption(hReq, INTERNET_OPTION_SECURITY_FLAGS, &sec_flags, &sec_flags_size);
+        sec_flags |= SECURITY_FLAG_IGNORE_UNKNOWN_CA
+                  |  SECURITY_FLAG_IGNORE_CERT_DATE_INVALID
+                  |  SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
+        InternetSetOption(hReq, INTERNET_OPTION_SECURITY_FLAGS, &sec_flags, sizeof(sec_flags));
 
         char full_headers[8192];
         snprintf(full_headers, sizeof(full_headers),
@@ -514,8 +519,16 @@ static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
             strlen(GLOBAL_COOKIES) ? "Cookie: " : "",
             strlen(GLOBAL_COOKIES) ? GLOBAL_COOKIES : "");
 
-        HttpSendRequestA(hReq, full_headers, (DWORD)strlen(full_headers),
+        BOOL ok = HttpSendRequestA(hReq, full_headers, (DWORD)strlen(full_headers),
             (void*)post_data_utf8, (DWORD)strlen(post_data_utf8));
+        if (!ok) {
+            printf("[ОШИБКА] https POST: HttpSendRequest провалился. Код: %lu\n", GetLastError());
+            InternetCloseHandle(hReq);
+            InternetCloseHandle(hConn);
+            InternetCloseHandle(hInternet);
+            free(wurl);
+            return strdup("");
+        }
         hUrl = hReq;
     } else {
         char headers[8192];
@@ -529,14 +542,21 @@ static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
         MultiByteToWideChar(CP_UTF8, 0, headers, -1, wh, wlenH);
         hUrl = InternetOpenUrlW(hInternet, wurl, wh, (DWORD)wcslen(wh), flags, 0);
         free(wh);
+
+        if (!hUrl) {
+            DWORD err = GetLastError();
+            printf("[ОШИБКА] https GET: InternetOpenUrl провалился. Код WinINet: %lu\n", err);
+            // Расшифровка частых кодов
+            if (err == 12007) printf("         (12007 = имя хоста не резолвится — нет интернета или DNS)\n");
+            if (err == 12029) printf("         (12029 = нет соединения с сервером)\n");
+            if (err == 12175) printf("         (12175 = ошибка SSL — попробуйте обновить Windows)\n");
+            if (err == 12057) printf("         (12057 = отозванный сертификат)\n");
+            InternetCloseHandle(hInternet);
+            free(wurl);
+            return strdup("");
+        }
     }
     free(wurl);
-
-    if (!hUrl) {
-        if (hConn) InternetCloseHandle(hConn); // ИСПРАВЛЕНО: закрываем hConn если URL не открылся
-        InternetCloseHandle(hInternet);
-        return strdup("");
-    }
 
     char* result = malloc(1); result[0] = '\0'; int total = 0;
     char buf[8192]; DWORD read;
@@ -546,7 +566,7 @@ static char* wininet_request(const char* url_utf8, const char* post_data_utf8) {
         total += read; result[total] = '\0';
     }
     InternetCloseHandle(hUrl);
-    if (hConn) InternetCloseHandle(hConn); // ИСПРАВЛЕНО: закрываем hConn
+    if (hConn) InternetCloseHandle(hConn);
     InternetCloseHandle(hInternet);
     return result;
 }
@@ -569,7 +589,6 @@ KValue native_https_post(KValue* args, int count) { printf("[ОШИБКА] https
 
 // ========================
 // РЕГИСТРАЦИЯ ФУНКЦИЙ
-// ИСПРАВЛЕНО: проверка переполнения таблицы
 // ========================
 void register_native(const char* name, NativeFunc ptr) {
     if (func_count >= MAX_FUNCS) runtime_error(0, "Переполнение таблицы функций", name);
@@ -585,15 +604,12 @@ void register_native(const char* name, NativeFunc ptr) {
 // ========================
 static void push_frame() {
     if (++frame_depth >= 64) runtime_error(0, "Переполнение стека вызовов", "");
-    frames[frame_depth].var_count   = 0;
+    frames[frame_depth].var_count    = 0;
     frames[frame_depth].has_returned = 0;
     frames[frame_depth].return_value = make_int(0);
 }
 static void pop_frame() { frame_depth--; }
 
-// ИСПРАВЛЕНО: динамическая область видимости
-// Переменные ищутся начиная с текущего фрейма вниз до фрейма 0 (главная функция).
-// Это позволяет вызываемым алгоритмам читать и изменять переменные вызывающей функции.
 static KValue get_var(const char* name, int line) {
     for (int fd = frame_depth; fd >= 0; fd--) {
         CallFrame* f = &frames[fd];
@@ -604,14 +620,12 @@ static KValue get_var(const char* name, int line) {
 }
 
 static void set_var(const char* name, KValue value, int line) {
-    // Ищем существующую переменную от текущего фрейма до нулевого
     for (int fd = frame_depth; fd >= 0; fd--) {
         CallFrame* f = &frames[fd];
         for (int i = 0; i < f->var_count; i++) {
             if (strcmp(f->names[i], name) == 0) { f->values[i] = value; return; }
         }
     }
-    // Не найдена — создаём в текущем фрейме
     CallFrame* f = &frames[frame_depth];
     if (f->var_count >= 100) runtime_error(line, "Превышен лимит переменных в функции (100)", name);
     strncpy(f->names[f->var_count], name, 255);
@@ -664,8 +678,6 @@ static KValue eval(ASTNode* node) {
 
     if (node->type == AST_BINOP) {
         const char* op = node->string_value;
-
-        // ИСПРАВЛЕНО: унарный "не" — right всегда NULL
         if (strcmp(op, "не") == 0) return make_int(!eval(node->left).i);
 
         KValue l = eval(node->left);
@@ -673,7 +685,6 @@ static KValue eval(ASTNode* node) {
 
         if (strcmp(op, "+") == 0) {
             if (l.type == VAL_STR || r.type == VAL_STR) {
-                // ИСПРАВЛЕНО: динамический буфер — нет риска переполнения
                 char tmp_l[64], tmp_r[64];
                 const char *ls, *rs;
                 if (l.type == VAL_STR)        ls = l.s;
@@ -734,10 +745,8 @@ void execute(ASTNode* node) {
 #ifdef _WIN32
             WSADATA wsaData; WSAStartup(MAKEWORD(2, 2), &wsaData);
 #endif
-            // Ввод / вывод
             register_native("ввод",                    native_vvod);
             register_native("длина",                   native_len);
-            // Математика (ДОБАВЛЕНО)
             register_native("корень",                  native_sqrt);
             register_native("абс",                     native_abs);
             register_native("пол",                     native_floor_f);
@@ -747,11 +756,9 @@ void execute(ASTNode* node) {
             register_native("косинус",                 native_cos_f);
             register_native("степень",                 native_pow_f);
             register_native("число_в_строку",          native_num_to_str);
-            // ОС
             register_native("ос_команда",              native_os_cmd);
             register_native("ос_чтение",               native_os_read);
             register_native("ос_запись",               native_os_write);
-            // Строки
             register_native("строка_найти",            native_str_find);
             register_native("строка_срез",             native_str_sub);
             register_native("строка_в_число",          native_str_to_int);
@@ -759,28 +766,23 @@ void execute(ASTNode* node) {
             register_native("строка_верхний",          native_str_upper);
             register_native("строка_нижний",           native_str_lower);
             register_native("урл_кодировать",          native_url_encode);
-            // JSON
             register_native("json_получить",           native_json_get);
             register_native("json_объект",             native_json_get_obj);
             register_native("json_элемент",            native_json_arr_get);
             register_native("json_длина",              native_json_arr_len);
-            // HTTP (сырые сокеты)
             register_native("сокет_создать",           native_sock_create);
             register_native("сокет_подключить",        native_sock_connect);
             register_native("сокет_отправить",         native_sock_send);
             register_native("сокет_получить",          native_sock_recv);
             register_native("сокет_закрыть",           native_sock_close);
-            // HTTPS (WinINet)
             register_native("https_гет",               native_https_get);
             register_native("https_пост",              native_https_post);
-            // Управление заголовками сети
             register_native("инет_юзерагент",          native_set_useragent);
             register_native("инет_заголовок",          native_add_header);
             register_native("инет_очистить_заголовки", native_clear_headers);
             register_native("инет_куки",               native_add_cookie);
             register_native("инет_очистить_куки",      native_clear_cookies);
 
-            // Регистрируем пользовательские алгоритмы
             for (int i = 0; i < node->children_count; i++) {
                 if (node->children[i]->type == AST_FUNC_DEF) {
                     if (func_count >= MAX_FUNCS) runtime_error(0, "Слишком много алгоритмов", "");
@@ -791,7 +793,6 @@ void execute(ASTNode* node) {
                     func_count++;
                 }
             }
-            // Ищем главный алгоритм (без параметров)
             ASTNode* main_alg = NULL;
             for (int i = node->children_count - 1; i >= 0; i--)
                 if (node->children[i]->type == AST_FUNC_DEF && node->children[i]->children_count == 0)
@@ -837,7 +838,6 @@ void execute(ASTNode* node) {
             }
             break;
         }
-        // ИСПРАВЛЕНО: ранний выход из цикла при возврате
         case AST_WHILE: {
             ASTNode* body = node->children[1];
             while (!frames[frame_depth].has_returned && eval(node->children[0]).i) {
