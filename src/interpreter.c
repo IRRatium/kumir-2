@@ -5,6 +5,7 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <ws2tcpip.h>
+#include <wininet.h>
 #else
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -17,14 +18,42 @@
 // ========================
 // ЗНАЧЕНИЯ
 // ========================
-KValue make_int(long long v) { KValue val; val.type = VAL_INT;   val.i = v;   val.f = 0.0; val.s = NULL; val.arr = NULL; val.dict = NULL; return val; }
-KValue make_float(double v){ KValue val; val.type = VAL_FLOAT; val.i = 0;   val.f = v;   val.s = NULL; val.arr = NULL; val.dict = NULL; return val; }
-KValue make_str(const char* v) { KValue val; val.type = VAL_STR; val.s = strdup(v ? v : ""); val.arr = NULL; val.dict = NULL; return val; }
+KValue make_int(long long v) { KValue val; val.type = VAL_INT;   val.i = v;   val.f = 0.0; val.s = NULL; val.arr = NULL; return val; }
+KValue make_float(double v){ KValue val; val.type = VAL_FLOAT; val.i = 0;   val.f = v;   val.s = NULL; val.arr = NULL; return val; }
+KValue make_str(const char* v) { KValue val; val.type = VAL_STR; val.s = strdup(v ? v : ""); val.arr = NULL; return val; }
 KValue make_array(int size) {
-    KValue val; val.type = VAL_ARRAY; val.arr = malloc(sizeof(KArray)); val.dict = NULL;
+    KValue val; val.type = VAL_ARRAY; val.arr = malloc(sizeof(KArray));
     val.arr->ref_count = 1; val.arr->length = size; val.arr->items = malloc(size * sizeof(KValue));
     for (int i = 0; i < size; i++) val.arr->items[i] = make_int(0);
     return val;
+}
+
+// НОВОЕ: Встроенные "Словари" на базе массивов [key1, val1, key2, val2...]
+void array_append(KArray* arr, KValue val) {
+    arr->length++;
+    arr->items = realloc(arr->items, arr->length * sizeof(KValue));
+    arr->items[arr->length - 1] = val;
+}
+KValue native_dict_create(KValue* args, int count) { return make_array(0); }
+KValue native_dict_write(KValue* args, int count) {
+    if (count < 3 || args[0].type != VAL_ARRAY || args[1].type != VAL_STR) return make_int(0);
+    KArray* dict = args[0].arr;
+    for (int i = 0; i < dict->length; i += 2) {
+        if (dict->items[i].type == VAL_STR && strcmp(dict->items[i].s, args[1].s) == 0) {
+            dict->items[i+1] = args[2]; return make_int(1); // Обновление
+        }
+    }
+    array_append(dict, args[1]); array_append(dict, args[2]); return make_int(1);
+}
+KValue native_dict_read(KValue* args, int count) {
+    if (count < 2 || args[0].type != VAL_ARRAY || args[1].type != VAL_STR) return make_str("");
+    KArray* dict = args[0].arr;
+    for (int i = 0; i < dict->length; i += 2) {
+        if (dict->items[i].type == VAL_STR && strcmp(dict->items[i].s, args[1].s) == 0) {
+            return dict->items[i+1];
+        }
+    }
+    return make_str(""); 
 }
 
 // ========================
@@ -52,12 +81,26 @@ typedef struct {
 static CallFrame frames[64];
 static int frame_depth = -1;
 
-void runtime_error(int line, const char* msg, const char* detail) {
-    printf("\n[ОШИБКА] Строка %d: %s '%s'\n", line, msg, detail ? detail : ""); exit(1);
+void runtime_error(const char* file, int line, const char* msg, const char* detail) {
+    printf("\n\033[1;31m[ОШИБКА ВЫПОЛНЕНИЯ]\033[0m Файл: \033[1;33m%s\033[0m, Строка \033[1;36m%d\033[0m\n\033[1;37m%s\033[0m \033[1;35m%s\033[0m\n", file ? file : "?", line, msg, detail ? detail : ""); 
+    exit(1);
 }
 
 // ========================
-// ВВОД
+// СЕТЬ И HTTP (НОВОЕ)
+// ========================
+static char GLOBAL_USER_AGENT[512] = "Kumir2/1.0";
+static char GLOBAL_HEADERS[4096]   = "";
+static char GLOBAL_COOKIES[4096]   = "";
+
+KValue native_set_useragent(KValue* args, int count) { if (args[0].type == VAL_STR) strncpy(GLOBAL_USER_AGENT, args[0].s, sizeof(GLOBAL_USER_AGENT) - 1); return make_int(0); }
+KValue native_add_header(KValue* args, int count) { if (args[0].type == VAL_STR) { size_t remaining = sizeof(GLOBAL_HEADERS) - strlen(GLOBAL_HEADERS) - 3; if (strlen(args[0].s) < remaining) { strcat(GLOBAL_HEADERS, args[0].s); strcat(GLOBAL_HEADERS, "\r\n"); } } return make_int(0); }
+KValue native_clear_headers(KValue* args, int count) { GLOBAL_HEADERS[0] = '\0'; return make_int(0); }
+KValue native_add_cookie(KValue* args, int count) { if (args[0].type == VAL_STR) { size_t cur = strlen(GLOBAL_COOKIES); size_t remaining = sizeof(GLOBAL_COOKIES) - cur - 3; if (strlen(args[0].s) < remaining) { if (cur > 0) strcat(GLOBAL_COOKIES, "; "); strcat(GLOBAL_COOKIES, args[0].s); } } return make_int(0); }
+KValue native_clear_cookies(KValue* args, int count) { GLOBAL_COOKIES[0] = '\0'; return make_int(0); }
+
+// ========================
+// ОС И ВВОД
 // ========================
 KValue native_vvod(KValue* args, int count) {
 #ifdef _WIN32
@@ -74,9 +117,6 @@ KValue native_vvod(KValue* args, int count) {
 #endif
 }
 
-// ========================
-// ОС И УТИЛИТЫ
-// ========================
 KValue native_len(KValue* args, int count) {
     if (args[0].type == VAL_STR)   return make_int((int)strlen(args[0].s));
     if (args[0].type == VAL_ARRAY) return make_int(args[0].arr->length);
@@ -218,8 +258,8 @@ KValue native_str_lower(KValue* args, int count) {
             unsigned char c2 = s[i+1];
             if (c2 >= 0x90 && c2 <= 0x9F)      { out[j++] = 0xD0; out[j++] = c2 + 0x20; }
             else if (c2 >= 0xA0 && c2 <= 0xAF) { out[j++] = 0xD1; out[j++] = c2 - 0x20; }
-            else if (c2 == 0x81)                { out[j++] = 0xD1; out[j++] = 0x91; }
-            else                                { out[j++] = c; out[j++] = c2; }
+            else if (c2 == 0x81)               { out[j++] = 0xD1; out[j++] = 0x91; }
+            else                               { out[j++] = c; out[j++] = c2; }
             i += 2;
         } else { out[j++] = c; i++; }
     }
@@ -392,39 +432,7 @@ KValue native_json_arr_len(KValue* args, int count) {
 }
 
 // ========================
-// СЛОВАРИ (НОВОЕ: PYTHON-LIKE ДИКТЫ)
-// ========================
-KValue native_dict_create(KValue* args, int count) {
-    KValue v; v.type = VAL_DICT; v.dict = calloc(1, sizeof(KDict)); return v;
-}
-
-KValue native_dict_set(KValue* args, int count) {
-    if (args[0].type != VAL_DICT || args[1].type != VAL_STR) return make_int(0);
-    KDict* d = args[0].dict; char* k = args[1].s; KValue val = args[2];
-    for (int i=0; i<d->count; i++) {
-        if (strcmp(d->items[i].key, k) == 0) { d->items[i].val = val; return make_int(1); }
-    }
-    if (d->count >= d->capacity) {
-        d->capacity = d->capacity == 0 ? 8 : d->capacity * 2;
-        d->items = realloc(d->items, d->capacity * sizeof(KDictItem));
-    }
-    d->items[d->count].key = strdup(k);
-    d->items[d->count].val = val;
-    d->count++;
-    return make_int(1);
-}
-
-KValue native_dict_get(KValue* args, int count) {
-    if (args[0].type != VAL_DICT || args[1].type != VAL_STR) return make_str("");
-    KDict* d = args[0].dict; char* k = args[1].s;
-    for (int i=0; i<d->count; i++) {
-        if (strcmp(d->items[i].key, k) == 0) return d->items[i].val;
-    }
-    return make_str("");
-}
-
-// ========================
-// СЫРЫЕ СОКЕТЫ (НОВОЕ: СЕРВЕРЫ И КЛИЕНТЫ)
+// СЫРЫЕ СОКЕТЫ (ЯДРО ИНТЕРНЕТА)
 // ========================
 KValue native_sock_create(KValue* args, int count) {
     int s = socket(AF_INET, SOCK_STREAM, 0); return make_int(s);
@@ -441,7 +449,7 @@ KValue native_sock_bind(KValue* args, int count) {
     if (args[0].type != VAL_INT || args[1].type != VAL_STR || args[2].type != VAL_INT) return make_int(0);
     struct sockaddr_in addr; memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = inet_addr(args[1].s); // "0.0.0.0" или "127.0.0.1"
+    addr.sin_addr.s_addr = inet_addr(args[1].s); 
     addr.sin_port = htons(args[2].i);
     return make_int(bind(args[0].i, (struct sockaddr*)&addr, sizeof(addr)) == 0 ? 1 : 0);
 }
@@ -474,7 +482,7 @@ KValue native_sock_close(KValue* args, int count) {
 }
 
 // ========================
-// FFI (НОВОЕ: ПРЯМОЙ ДОСТУП К СИСТЕМЕ)
+// FFI (ПРЯМОЙ ДОСТУП К СИСТЕМЕ)
 // ========================
 typedef long long (*FFIFunc0)();
 typedef long long (*FFIFunc1)(long long);
@@ -536,38 +544,26 @@ KValue native_mem_write_str(KValue* args, int count) {
 }
 
 // ========================
-// РЕГИСТРАЦИЯ ФУНКЦИЙ
-// ========================
-void register_native(const char* name, NativeFunc ptr) {
-    if (func_count >= MAX_FUNCS) runtime_error(0, "Переполнение таблицы функций", name);
-    strncpy(func_table[func_count].name, name, 255);
-    func_table[func_count].name[255] = '\0';
-    func_table[func_count].def        = NULL;
-    func_table[func_count].native_ptr = ptr;
-    func_count++;
-}
-
-// ========================
-// УПРАВЛЕНИЕ ФРЕЙМАМИ
+// УПРАВЛЕНИЕ СТЕКОМ И ВЫЗОВАМИ
 // ========================
 static void push_frame() {
-    if (++frame_depth >= 64) runtime_error(0, "Переполнение стека вызовов", "");
+    if (++frame_depth >= 64) runtime_error("Внутренний сбой", 0, "Переполнение стека вызовов", "");
     frames[frame_depth].var_count    = 0;
     frames[frame_depth].has_returned = 0;
     frames[frame_depth].return_value = make_int(0);
 }
 static void pop_frame() { frame_depth--; }
 
-static KValue get_var(const char* name, int line) {
+static KValue get_var(const char* name, ASTNode* node) {
     for (int fd = frame_depth; fd >= 0; fd--) {
         CallFrame* f = &frames[fd];
         for (int i = 0; i < f->var_count; i++)
             if (strcmp(f->names[i], name) == 0) return f->values[i];
     }
-    runtime_error(line, "Переменная не найдена", name); return make_int(0);
+    runtime_error(node->file, node->line, "Переменная не найдена", name); return make_int(0);
 }
 
-static void set_var(const char* name, KValue value, int line) {
+static void set_var(const char* name, KValue value, ASTNode* node) {
     for (int fd = frame_depth; fd >= 0; fd--) {
         CallFrame* f = &frames[fd];
         for (int i = 0; i < f->var_count; i++) {
@@ -575,7 +571,7 @@ static void set_var(const char* name, KValue value, int line) {
         }
     }
     CallFrame* f = &frames[frame_depth];
-    if (f->var_count >= 100) runtime_error(line, "Превышен лимит переменных в функции (100)", name);
+    if (f->var_count >= 100) runtime_error(node->file, node->line, "Превышен лимит переменных", name);
     strncpy(f->names[f->var_count], name, 255);
     f->names[f->var_count][255] = '\0';
     f->values[f->var_count] = value;
@@ -589,14 +585,14 @@ static KValue call_func(ASTNode* call_node) {
     const char* name = call_node->string_value; int f_idx = -1;
     for (int i = 0; i < func_count; i++)
         if (strcmp(func_table[i].name, name) == 0) { f_idx = i; break; }
-    if (f_idx == -1) runtime_error(call_node->line, "Алгоритм не найден", name);
+    if (f_idx == -1) runtime_error(call_node->file, call_node->line, "Алгоритм не найден", name);
     KValue args[100];
     for (int i = 0; i < call_node->children_count; i++) args[i] = eval(call_node->children[i]);
     if (func_table[f_idx].native_ptr) return func_table[f_idx].native_ptr(args, call_node->children_count);
 
     ASTNode* def = func_table[f_idx].def; push_frame();
     for (int i = 0; i < def->children_count; i++)
-        set_var(def->children[i]->string_value, args[i], call_node->line);
+        set_var(def->children[i]->string_value, args[i], call_node);
     for (int i = 0; i < def->left->children_count; i++) {
         execute(def->left->children[i]);
         if (frames[frame_depth].has_returned) break;
@@ -609,7 +605,7 @@ static KValue eval(ASTNode* node) {
     if (node->type == AST_NUM)       return make_int(node->int_value);
     if (node->type == AST_FLOAT)     return make_float(node->float_value);
     if (node->type == AST_STR)       return make_str(node->string_value);
-    if (node->type == AST_VAR)       return get_var(node->string_value, node->line);
+    if (node->type == AST_VAR)       return get_var(node->string_value, node);
     if (node->type == AST_FUNC_CALL) return call_func(node);
 
     if (node->type == AST_ARRAY_LIT) {
@@ -619,22 +615,19 @@ static KValue eval(ASTNode* node) {
     }
     if (node->type == AST_INDEX_ACCESS) {
         KValue arr = eval(node->left); KValue idx = eval(node->right);
-        if (arr.type != VAL_ARRAY || idx.type != VAL_INT) runtime_error(node->line, "Ошибка индексации", "");
-        if (idx.i < 0 || idx.i >= arr.arr->length) runtime_error(node->line, "Индекс вне границ", "");
+        if (arr.type != VAL_ARRAY || idx.type != VAL_INT) runtime_error(node->file, node->line, "Ошибка индексации", "");
+        if (idx.i < 0 || idx.i >= arr.arr->length) runtime_error(node->file, node->line, "Индекс вне границ", "");
         return arr.arr->items[idx.i];
     }
 
     if (node->type == AST_BINOP) {
         const char* op = node->string_value;
         if (strcmp(op, "не") == 0) return make_int(!eval(node->left).i);
-
-        KValue l = eval(node->left);
-        KValue r = eval(node->right);
-
+        KValue l = eval(node->left); KValue r = eval(node->right);
+        
         if (strcmp(op, "+") == 0) {
             if (l.type == VAL_STR || r.type == VAL_STR) {
-                char tmp_l[64], tmp_r[64];
-                const char *ls, *rs;
+                char tmp_l[64], tmp_r[64]; const char *ls, *rs;
                 if (l.type == VAL_STR)        ls = l.s;
                 else if (l.type == VAL_FLOAT) { snprintf(tmp_l, sizeof(tmp_l), "%g", l.f); ls = tmp_l; }
                 else                          { snprintf(tmp_l, sizeof(tmp_l), "%lld", l.i); ls = tmp_l; }
@@ -642,27 +635,18 @@ static KValue eval(ASTNode* node) {
                 else if (r.type == VAL_FLOAT) { snprintf(tmp_r, sizeof(tmp_r), "%g", r.f); rs = tmp_r; }
                 else                          { snprintf(tmp_r, sizeof(tmp_r), "%lld", r.i); rs = tmp_r; }
                 size_t total = strlen(ls) + strlen(rs) + 1;
-                char* buf = malloc(total);
-                snprintf(buf, total, "%s%s", ls, rs);
+                char* buf = malloc(total); snprintf(buf, total, "%s%s", ls, rs);
                 KValue res = make_str(buf); free(buf); return res;
             }
-            if (l.type == VAL_FLOAT || r.type == VAL_FLOAT)
-                return make_float((l.type==VAL_FLOAT?l.f:l.i) + (r.type==VAL_FLOAT?r.f:r.i));
+            if (l.type == VAL_FLOAT || r.type == VAL_FLOAT) return make_float((l.type==VAL_FLOAT?l.f:l.i) + (r.type==VAL_FLOAT?r.f:r.i));
             return make_int(l.i + r.i);
         }
-        if (strcmp(op, "-") == 0)
-            return (l.type==VAL_FLOAT||r.type==VAL_FLOAT) ?
-                make_float((l.type==VAL_FLOAT?l.f:l.i) - (r.type==VAL_FLOAT?r.f:r.i)) : make_int(l.i - r.i);
-        if (strcmp(op, "*") == 0)
-            return (l.type==VAL_FLOAT||r.type==VAL_FLOAT) ?
-                make_float((l.type==VAL_FLOAT?l.f:l.i) * (r.type==VAL_FLOAT?r.f:r.i)) : make_int(l.i * r.i);
-        if (strcmp(op, "/") == 0)
-            return (l.type==VAL_FLOAT||r.type==VAL_FLOAT) ?
-                make_float((l.type==VAL_FLOAT?l.f:l.i) / (r.type==VAL_FLOAT?r.f:r.i)) : make_int(l.i / r.i);
+        if (strcmp(op, "-") == 0) return (l.type==VAL_FLOAT||r.type==VAL_FLOAT) ? make_float((l.type==VAL_FLOAT?l.f:l.i) - (r.type==VAL_FLOAT?r.f:r.i)) : make_int(l.i - r.i);
+        if (strcmp(op, "*") == 0) return (l.type==VAL_FLOAT||r.type==VAL_FLOAT) ? make_float((l.type==VAL_FLOAT?l.f:l.i) * (r.type==VAL_FLOAT?r.f:r.i)) : make_int(l.i * r.i);
+        if (strcmp(op, "/") == 0) return (l.type==VAL_FLOAT||r.type==VAL_FLOAT) ? make_float((l.type==VAL_FLOAT?l.f:l.i) / (r.type==VAL_FLOAT?r.f:r.i)) : make_int(l.i / r.i);
         if (strcmp(op, "%") == 0) return make_int(l.i % (r.i == 0 ? 1 : r.i));
 
-        double lv = (l.type==VAL_FLOAT)?l.f:l.i;
-        double rv = (r.type==VAL_FLOAT)?r.f:r.i;
+        double lv = (l.type==VAL_FLOAT)?l.f:l.i; double rv = (r.type==VAL_FLOAT)?r.f:r.i;
         if (strcmp(op, "=")  == 0) return l.type==VAL_STR ? make_int(strcmp(l.s,r.s)==0) : make_int(lv==rv);
         if (strcmp(op, "<>") == 0) return l.type==VAL_STR ? make_int(strcmp(l.s,r.s)!=0) : make_int(lv!=rv);
         if (strcmp(op, "<")  == 0) return make_int(lv < rv);
@@ -684,15 +668,18 @@ void print_val(KValue v) {
         for (int i = 0; i < v.arr->length; i++) { print_val(v.arr->items[i]); if (i < v.arr->length-1) printf(", "); }
         printf("]");
     }
-    else if (v.type == VAL_DICT) {
-        printf("{");
-        for (int i = 0; i < v.dict->count; i++) {
-            printf("\"%s\": ", v.dict->items[i].key);
-            print_val(v.dict->items[i].val);
-            if (i < v.dict->count - 1) printf(", ");
-        }
-        printf("}");
-    }
+}
+
+// ========================
+// РЕГИСТРАЦИЯ ФУНКЦИЙ
+// ========================
+void register_native(const char* name, NativeFunc ptr) {
+    if (func_count >= MAX_FUNCS) runtime_error("Внутренний сбой", 0, "Переполнение таблицы функций", name);
+    strncpy(func_table[func_count].name, name, 255);
+    func_table[func_count].name[255] = '\0';
+    func_table[func_count].def        = NULL;
+    func_table[func_count].native_ptr = ptr;
+    func_count++;
 }
 
 void execute(ASTNode* node) {
@@ -735,12 +722,19 @@ void execute(ASTNode* node) {
             register_native("json_элемент",            native_json_arr_get);
             register_native("json_длина",              native_json_arr_len);
             
-            // СЛОВАРИ
+            // СЛОВАРИ (НОВОЕ: НА БАЗЕ МАССИВОВ)
             register_native("словарь",                 native_dict_create);
-            register_native("сл_записать",             native_dict_set);
-            register_native("сл_читать",               native_dict_get);
+            register_native("сл_записать",             native_dict_write);
+            register_native("сл_читать",               native_dict_read);
 
-            // СЫРЫЕ СОКЕТЫ (ЯДРО ИНТЕРНЕТА)
+            // СЕТЕВЫЕ ЗАГОЛОВКИ (НОВОЕ)
+            register_native("сеть_юзерагент",          native_set_useragent);
+            register_native("сеть_заголовок",          native_add_header);
+            register_native("сеть_очистить_заголовки", native_clear_headers);
+            register_native("сеть_куки",               native_add_cookie);
+            register_native("сеть_очистить_куки",      native_clear_cookies);
+
+            // СЫРЫЕ СОКЕТЫ
             register_native("сокет_создать",           native_sock_create);
             register_native("сокет_подключить",        native_sock_connect);
             register_native("сокет_бинд",              native_sock_bind);
@@ -750,7 +744,7 @@ void execute(ASTNode* node) {
             register_native("сокет_получить",          native_sock_recv);
             register_native("сокет_закрыть",           native_sock_close);
 
-            // FFI (ЯДРО ДОСТУПА К СИСТЕМЕ И ПАМЯТИ)
+            // FFI
             register_native("апи_вызов",               native_api_call);
             register_native("память_выделить",         native_mem_alloc);
             register_native("память_освободить",       native_mem_free);
@@ -759,7 +753,7 @@ void execute(ASTNode* node) {
 
             for (int i = 0; i < node->children_count; i++) {
                 if (node->children[i]->type == AST_FUNC_DEF) {
-                    if (func_count >= MAX_FUNCS) runtime_error(0, "Слишком много алгоритмов", "");
+                    if (func_count >= MAX_FUNCS) runtime_error("Внутренний сбой", 0, "Слишком много алгоритмов", "");
                     strncpy(func_table[func_count].name, node->children[i]->string_value, 255);
                     func_table[func_count].name[255] = '\0';
                     func_table[func_count].def = node->children[i];
@@ -779,10 +773,10 @@ void execute(ASTNode* node) {
             }
             break;
         }
-        case AST_VAR_DECL: set_var(node->string_value, make_int(0), node->line); break;
+        case AST_VAR_DECL: set_var(node->string_value, make_int(0), node); break;
         case AST_ASSIGN:
             if (node->left->type == AST_VAR)
-                set_var(node->left->string_value, eval(node->right), node->line);
+                set_var(node->left->string_value, eval(node->right), node);
             else if (node->left->type == AST_INDEX_ACCESS) {
                 KValue arr = eval(node->left->left);
                 KValue idx = eval(node->left->right);
@@ -791,45 +785,26 @@ void execute(ASTNode* node) {
                     arr.arr->items[idx.i] = val;
             }
             break;
-        case AST_RETURN:
-            frames[frame_depth].return_value = eval(node->left);
-            frames[frame_depth].has_returned = 1;
-            break;
+        case AST_RETURN: frames[frame_depth].return_value = eval(node->left); frames[frame_depth].has_returned = 1; break;
         case AST_FUNC_CALL: call_func(node); break;
         case AST_IF: {
             if (eval(node->children[0]).i) {
-                ASTNode* body = node->children[1];
-                for (int i = 0; i < body->children_count; i++) {
-                    execute(body->children[i]);
-                    if (frames[frame_depth].has_returned) break;
-                }
+                for (int i = 0; i < node->children[1]->children_count; i++) { execute(node->children[1]->children[i]); if (frames[frame_depth].has_returned) break; }
             } else if (node->children_count > 2) {
-                ASTNode* body = node->children[2];
-                for (int i = 0; i < body->children_count; i++) {
-                    execute(body->children[i]);
-                    if (frames[frame_depth].has_returned) break;
-                }
+                for (int i = 0; i < node->children[2]->children_count; i++) { execute(node->children[2]->children[i]); if (frames[frame_depth].has_returned) break; }
             }
             break;
         }
         case AST_WHILE: {
-            ASTNode* body = node->children[1];
             while (!frames[frame_depth].has_returned && eval(node->children[0]).i) {
-                for (int i = 0; i < body->children_count; i++) {
-                    execute(body->children[i]);
-                    if (frames[frame_depth].has_returned) break;
-                }
+                for (int i = 0; i < node->children[1]->children_count; i++) { execute(node->children[1]->children[i]); if (frames[frame_depth].has_returned) break; }
             }
             break;
         }
         case AST_REPEAT: {
             int times = eval(node->children[0]).i;
-            ASTNode* body = node->children[1];
             for (int t = 0; t < times && !frames[frame_depth].has_returned; t++) {
-                for (int i = 0; i < body->children_count; i++) {
-                    execute(body->children[i]);
-                    if (frames[frame_depth].has_returned) break;
-                }
+                for (int i = 0; i < node->children[1]->children_count; i++) { execute(node->children[1]->children[i]); if (frames[frame_depth].has_returned) break; }
             }
             break;
         }
