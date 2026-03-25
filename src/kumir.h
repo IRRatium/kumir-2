@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 
 // ========================
 // ЛЕКСЕР
@@ -29,18 +28,16 @@ typedef struct {
 // ========================
 // ДАННЫЕ
 // ========================
-typedef enum { VAL_INT, VAL_FLOAT, VAL_STR, VAL_ARRAY, VAL_DICT } ValType;
+typedef enum { VAL_INT, VAL_FLOAT, VAL_STR, VAL_ARRAY } ValType;
 
 struct KArray;
-struct KDict;
 
 typedef struct {
     ValType type;
-    long long i;   // Используется для чисел и сырых указателей памяти (FFI)
+    long long i;   
     double f;
     char* s;
     struct KArray* arr;
-    struct KDict* dict; // СЛОВАРИ (КАК В PYTHON)
 } KValue;
 
 typedef struct KArray {
@@ -48,18 +45,6 @@ typedef struct KArray {
     int length;
     KValue* items;
 } KArray;
-
-// Структуры для словарей
-typedef struct KDictItem {
-    char* key;
-    KValue val;
-} KDictItem;
-
-typedef struct KDict {
-    int count;
-    int capacity;
-    KDictItem* items;
-} KDict;
 
 // ========================
 // AST УЗЛЫ
@@ -74,8 +59,9 @@ typedef enum {
 
 typedef struct ASTNode {
     ASTNodeType type;
+    const char* file;      // <-- НОВОЕ: Имя файла
     char* string_value;
-    long long int_value;
+    long long int_value;   
     double float_value;
     int line;
     struct ASTNode* left;
@@ -84,14 +70,18 @@ typedef struct ASTNode {
     int children_count;
 } ASTNode;
 
+extern const char* current_filename; // Глобальная переменная для текущего файла
+
 char* read_file_content(const char* filename);
 Token get_next_token(const char** source, int* current_line);
 ASTNode* parse(const char* source);
 void execute(ASTNode* node);
-void parse_error(int line, const char* msg, const char* detail);
-void runtime_error(int line, const char* msg, const char* detail);
 
-KValue make_int(long long v);
+// НОВОЕ: Передаем имя файла в ошибки
+void parse_error(const char* file, int line, const char* msg, const char* detail);
+void runtime_error(const char* file, int line, const char* msg, const char* detail);
+
+KValue make_int(long long v);   
 KValue make_float(double v);
 KValue make_str(const char* v);
 KValue make_array(int size);
