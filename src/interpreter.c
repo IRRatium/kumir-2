@@ -28,7 +28,7 @@ KValue make_array(int size) {
     return val;
 }
 
-// НОВОЕ: Встроенные "Словари" на базе массивов [key1, val1, key2, val2...]
+// Встроенные "Словари" на базе массивов [key1, val1, key2, val2...]
 void array_append(KArray* arr, KValue val) {
     arr->length++;
     arr->items = realloc(arr->items, arr->length * sizeof(KValue));
@@ -40,7 +40,7 @@ KValue native_dict_write(KValue* args, int count) {
     KArray* dict = args[0].arr;
     for (int i = 0; i < dict->length; i += 2) {
         if (dict->items[i].type == VAL_STR && strcmp(dict->items[i].s, args[1].s) == 0) {
-            dict->items[i+1] = args[2]; return make_int(1); // Обновление
+            dict->items[i+1] = args[2]; return make_int(1);
         }
     }
     array_append(dict, args[1]); array_append(dict, args[2]); return make_int(1);
@@ -87,7 +87,7 @@ void runtime_error(const char* file, int line, const char* msg, const char* deta
 }
 
 // ========================
-// СЕТЬ И HTTP (НОВОЕ)
+// СЕТЬ И HTTP
 // ========================
 static char GLOBAL_USER_AGENT[512] = "Kumir2/1.0";
 static char GLOBAL_HEADERS[4096]   = "";
@@ -188,8 +188,10 @@ KValue native_str_find(KValue* args, int count) {
     return p ? make_int((int)(p - args[0].s)) : make_int(-1);
 }
 KValue native_str_sub(KValue* args, int count) {
-    if (args[0].type != VAL_STR || args[1].type != VAL_INT || args[2].type != VAL_INT) return make_str("");
-    int start = args[1].i, end = args[2].i, len = (int)strlen(args[0].s);
+    if (args[0].type != VAL_STR) return make_str("");
+    int start = (args[1].type == VAL_INT) ? (int)args[1].i : 0;
+    int end   = (args[2].type == VAL_INT) ? (int)args[2].i : (int)strlen(args[0].s);
+    int len = (int)strlen(args[0].s);
     if (start < 0) start = 0;
     if (end > len) end = len;
     if (start > end || start >= len) return make_str("");
@@ -218,6 +220,8 @@ KValue native_str_replace(KValue* args, int count) {
     KValue v = make_str(result); free(result); return v;
 }
 
+// БАГ #4 ИСПРАВЛЕН: убран мёртвый/неверный код для 0xB5 (е → Ё вместо Е).
+// Буква е (0xD0 0xB5) уже корректно обрабатывается ветвью c2 >= 0xB0 && c2 <= 0xBF.
 KValue native_str_upper(KValue* args, int count) {
     if (args[0].type != VAL_STR) return make_str("");
     unsigned char* s = (unsigned char*)args[0].s;
@@ -229,15 +233,15 @@ KValue native_str_upper(KValue* args, int count) {
         if (c >= 'a' && c <= 'z') { out[j++] = c - 32; i++; }
         else if (c == 0xD0 && i + 1 < len) {
             unsigned char c2 = s[i+1];
-            if (c2 >= 0xB0 && c2 <= 0xBF) { out[j++] = 0xD0; out[j++] = c2 - 0x20; }
-            else if (c2 == 0xB5)           { out[j++] = 0xD0; out[j++] = 0x81; }
-            else                           { out[j++] = c; out[j++] = c2; }
+            if      (c2 >= 0xB0 && c2 <= 0xBF) { out[j++] = 0xD0; out[j++] = c2 - 0x20; } // а-п → А-П
+            else if (c2 == 0x81)               { /* Ё уже заглавная, оставить */ out[j++] = c; out[j++] = c2; }
+            else                               { out[j++] = c; out[j++] = c2; }
             i += 2;
         } else if (c == 0xD1 && i + 1 < len) {
             unsigned char c2 = s[i+1];
-            if (c2 >= 0x80 && c2 <= 0x8F) { out[j++] = 0xD0; out[j++] = c2 + 0x20; }
-            else if (c2 == 0x91)           { out[j++] = 0xD0; out[j++] = 0x81; }
-            else                           { out[j++] = c; out[j++] = c2; }
+            if      (c2 >= 0x80 && c2 <= 0x8F) { out[j++] = 0xD0; out[j++] = c2 + 0x20; } // р-я → Р-Я
+            else if (c2 == 0x91)               { out[j++] = 0xD0; out[j++] = 0x81; }        // ё → Ё
+            else                               { out[j++] = c; out[j++] = c2; }
             i += 2;
         } else { out[j++] = c; i++; }
     }
@@ -256,9 +260,9 @@ KValue native_str_lower(KValue* args, int count) {
         if (c >= 'A' && c <= 'Z') { out[j++] = c + 32; i++; }
         else if (c == 0xD0 && i + 1 < len) {
             unsigned char c2 = s[i+1];
-            if (c2 >= 0x90 && c2 <= 0x9F)      { out[j++] = 0xD0; out[j++] = c2 + 0x20; }
-            else if (c2 >= 0xA0 && c2 <= 0xAF) { out[j++] = 0xD1; out[j++] = c2 - 0x20; }
-            else if (c2 == 0x81)               { out[j++] = 0xD1; out[j++] = 0x91; }
+            if      (c2 >= 0x90 && c2 <= 0x9F) { out[j++] = 0xD0; out[j++] = c2 + 0x20; } // А-П → а-п
+            else if (c2 >= 0xA0 && c2 <= 0xAF) { out[j++] = 0xD1; out[j++] = c2 - 0x20; } // Р-Я → р-я
+            else if (c2 == 0x81)               { out[j++] = 0xD1; out[j++] = 0x91; }        // Ё → ё
             else                               { out[j++] = c; out[j++] = c2; }
             i += 2;
         } else { out[j++] = c; i++; }
@@ -432,7 +436,7 @@ KValue native_json_arr_len(KValue* args, int count) {
 }
 
 // ========================
-// СЫРЫЕ СОКЕТЫ (ЯДРО ИНТЕРНЕТА)
+// СЫРЫЕ СОКЕТЫ
 // ========================
 KValue native_sock_create(KValue* args, int count) {
     int s = socket(AF_INET, SOCK_STREAM, 0); return make_int(s);
@@ -441,7 +445,7 @@ KValue native_sock_connect(KValue* args, int count) {
     if (args[0].type != VAL_INT || args[1].type != VAL_STR || args[2].type != VAL_INT) return make_int(0);
     struct hostent* host = gethostbyname(args[1].s); if (!host) return make_int(0);
     struct sockaddr_in addr; memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET; addr.sin_port = htons(args[2].i);
+    addr.sin_family = AF_INET; addr.sin_port = htons((unsigned short)args[2].i);
     memcpy(&addr.sin_addr.s_addr, host->h_addr, host->h_length);
     return make_int(connect(args[0].i, (struct sockaddr*)&addr, sizeof(addr)) < 0 ? 0 : 1);
 }
@@ -450,18 +454,18 @@ KValue native_sock_bind(KValue* args, int count) {
     struct sockaddr_in addr; memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = inet_addr(args[1].s); 
-    addr.sin_port = htons(args[2].i);
+    addr.sin_port = htons((unsigned short)args[2].i);
     return make_int(bind(args[0].i, (struct sockaddr*)&addr, sizeof(addr)) == 0 ? 1 : 0);
 }
 KValue native_sock_listen(KValue* args, int count) {
     if (args[0].type != VAL_INT || args[1].type != VAL_INT) return make_int(0);
-    return make_int(listen(args[0].i, args[1].i) == 0 ? 1 : 0);
+    return make_int(listen(args[0].i, (int)args[1].i) == 0 ? 1 : 0);
 }
 KValue native_sock_accept(KValue* args, int count) {
     if (args[0].type != VAL_INT) return make_int(0);
     struct sockaddr_in client_addr;
-    int client_len = sizeof(client_addr);
-    int client_sock = accept(args[0].i, (struct sockaddr*)&client_addr, (socklen_t*)&client_len);
+    socklen_t client_len = sizeof(client_addr);
+    int client_sock = accept(args[0].i, (struct sockaddr*)&client_addr, &client_len);
     return make_int(client_sock);
 }
 KValue native_sock_send(KValue* args, int count) {
@@ -472,7 +476,7 @@ KValue native_sock_send(KValue* args, int count) {
 KValue native_sock_recv(KValue* args, int count) {
     if (args[0].type != VAL_INT || args[1].type != VAL_INT) return make_str("");
     char* buf = calloc(1, args[1].i + 1);
-    int r = recv(args[0].i, buf, args[1].i, 0);
+    int r = recv(args[0].i, buf, (int)args[1].i, 0);
     if (r <= 0) { free(buf); return make_str(""); }
     KValue res = make_str(buf); free(buf); return res;
 }
@@ -495,13 +499,14 @@ typedef long long (*FFIFunc6)(long long, long long, long long, long long, long l
 KValue native_api_call(KValue* args, int count) {
     if (count < 2 || args[0].type != VAL_STR || args[1].type != VAL_STR) return make_int(0);
     
-    void* lib = NULL;
+    void* lib  = NULL;
     void* func = NULL;
 #ifdef _WIN32
-    lib = LoadLibraryA(args[0].s);
+    lib  = LoadLibraryA(args[0].s);
     if (lib) func = GetProcAddress((HMODULE)lib, args[1].s);
 #else
-    lib = dlopen(args[0].s, RTLD_LAZY);
+    // БАГ #2 ИСПРАВЛЕН: -ldl добавлен в build.yml (Linux) для dlopen/dlsym
+    lib  = dlopen(args[0].s, RTLD_LAZY);
     if (lib) func = dlsym(lib, args[1].s);
 #endif
 
@@ -509,19 +514,19 @@ KValue native_api_call(KValue* args, int count) {
 
     long long a[6] = {0, 0, 0, 0, 0, 0};
     for (int i = 0; i < 6 && (i + 2) < count; i++) {
-        if (args[i+2].type == VAL_INT) a[i] = args[i+2].i;
+        if      (args[i+2].type == VAL_INT) a[i] = args[i+2].i;
         else if (args[i+2].type == VAL_STR) a[i] = (long long)(intptr_t)args[i+2].s;
     }
 
     long long res = 0;
     int arg_cnt = count - 2;
-    if (arg_cnt == 0) res = ((FFIFunc0)func)();
+    if      (arg_cnt == 0) res = ((FFIFunc0)func)();
     else if (arg_cnt == 1) res = ((FFIFunc1)func)(a[0]);
     else if (arg_cnt == 2) res = ((FFIFunc2)func)(a[0], a[1]);
     else if (arg_cnt == 3) res = ((FFIFunc3)func)(a[0], a[1], a[2]);
     else if (arg_cnt == 4) res = ((FFIFunc4)func)(a[0], a[1], a[2], a[3]);
     else if (arg_cnt == 5) res = ((FFIFunc5)func)(a[0], a[1], a[2], a[3], a[4]);
-    else res = ((FFIFunc6)func)(a[0], a[1], a[2], a[3], a[4], a[5]);
+    else                   res = ((FFIFunc6)func)(a[0], a[1], a[2], a[3], a[4], a[5]);
 
     return make_int(res);
 }
@@ -537,9 +542,8 @@ KValue native_mem_read_str(KValue* args, int count) {
     return ptr ? make_str(ptr) : make_str("");
 }
 KValue native_mem_write_str(KValue* args, int count) {
-    if(args[0].type == VAL_INT && args[1].type == VAL_STR) {
+    if (args[0].type == VAL_INT && args[1].type == VAL_STR)
         strcpy((char*)(intptr_t)args[0].i, args[1].s);
-    }
     return make_int(0);
 }
 
@@ -722,12 +726,12 @@ void execute(ASTNode* node) {
             register_native("json_элемент",            native_json_arr_get);
             register_native("json_длина",              native_json_arr_len);
             
-            // СЛОВАРИ (НОВОЕ: НА БАЗЕ МАССИВОВ)
+            // СЛОВАРИ
             register_native("словарь",                 native_dict_create);
             register_native("сл_записать",             native_dict_write);
             register_native("сл_читать",               native_dict_read);
 
-            // СЕТЕВЫЕ ЗАГОЛОВКИ (НОВОЕ)
+            // СЕТЕВЫЕ ЗАГОЛОВКИ
             register_native("сеть_юзерагент",          native_set_useragent);
             register_native("сеть_заголовок",          native_add_header);
             register_native("сеть_очистить_заголовки", native_clear_headers);
@@ -802,7 +806,7 @@ void execute(ASTNode* node) {
             break;
         }
         case AST_REPEAT: {
-            int times = eval(node->children[0]).i;
+            int times = (int)eval(node->children[0]).i;
             for (int t = 0; t < times && !frames[frame_depth].has_returned; t++) {
                 for (int i = 0; i < node->children[1]->children_count; i++) { execute(node->children[1]->children[i]); if (frames[frame_depth].has_returned) break; }
             }
