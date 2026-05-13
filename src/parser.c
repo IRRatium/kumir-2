@@ -1,6 +1,7 @@
 #include "kumir.h"
 
-const char* current_filename = "main"; // Инициализируется в main.c
+// БАГ #1 ИСПРАВЛЕН: current_filename определена ТОЛЬКО в main.c.
+// Здесь была дублирующая definition — приводила к ошибке линковки.
 static int current_line = 1;
 static Token current_token;
 static const char* src_ptr;
@@ -8,7 +9,6 @@ static const char* src_ptr;
 static void advance() { current_token = get_next_token(&src_ptr, &current_line); }
 
 void parse_error(const char* file, int line, const char* msg, const char* detail) {
-    // ЦВЕТНОЙ ВЫВОД ОШИБОК
     printf("\n\033[1;31m[ОШИБКА СИНТАКСИСА]\033[0m Файл: \033[1;33m%s\033[0m, Строка \033[1;36m%d\033[0m\n\033[1;37m%s\033[0m \033[1;35m%s\033[0m\n", file, line, msg, detail ? detail : ""); 
     exit(1);
 }
@@ -17,7 +17,7 @@ static ASTNode* create_node(ASTNodeType type) {
     ASTNode* node = calloc(1, sizeof(ASTNode)); 
     node->type = type; 
     node->line = current_token.line; 
-    node->file = current_filename; // Привязка файла к узлу
+    node->file = current_filename;
     return node;
 }
 static void add_child(ASTNode* parent, ASTNode* child) {
@@ -138,7 +138,6 @@ static ASTNode* parse_expr() {
 }
 
 static ASTNode* parse_statement() {
-    // ИСПРАВЛЕНИЕ: ПОДДЕРЖКА "тип переменная := значение" В ОДНУ СТРОКУ
     if (current_token.type == TOKEN_TYPE_CEL || current_token.type == TOKEN_TYPE_LIT || current_token.type == TOKEN_TYPE_LOG || current_token.type == TOKEN_TYPE_VESH || current_token.type == TOKEN_TYPE_TAB) {
         advance(); 
         if (current_token.type != TOKEN_IDENTIFIER) parse_error(current_filename, current_token.line, "Ожидалось имя", "");
@@ -155,7 +154,7 @@ static ASTNode* parse_statement() {
             var_target->line = var_line;
             assign->left = var_target;
             assign->right = parse_expr();
-            return assign; // Во время выполнения переменная будет создана при присваивании
+            return assign;
         } else {
             ASTNode* decl = create_node(AST_VAR_DECL); 
             decl->string_value = var_name; 
@@ -234,6 +233,39 @@ static ASTNode* parse_func_def() {
     advance(); func->left = body; return func;
 }
 
+// ========================
+// ПОИСК БИБЛИОТЕКИ В НЕСКОЛЬКИХ МЕСТАХ
+// Ищет файл в: текущая папка → libs/ → рядом с главным файлом
+// ========================
+static char* find_and_load_lib(const char* libname, const char* main_file, char* resolved_name, int resolved_size) {
+    // 1. Попробовать как есть
+    char* src = read_file_content(libname);
+    if (src) { strncpy(resolved_name, libname, resolved_size - 1); return src; }
+
+    // 2. Попробовать папку libs/
+    char path[512];
+    snprintf(path, sizeof(path), "libs/%s", libname);
+    src = read_file_content(path);
+    if (src) { strncpy(resolved_name, path, resolved_size - 1); return src; }
+
+    // 3. Попробовать рядом с главным файлом (для include из подпапок)
+    if (main_file) {
+        const char* last_slash = strrchr(main_file, '/');
+#ifdef _WIN32
+        const char* last_bslash = strrchr(main_file, '\\');
+        if (last_bslash && (!last_slash || last_bslash > last_slash)) last_slash = last_bslash;
+#endif
+        if (last_slash) {
+            int dir_len = (int)(last_slash - main_file) + 1;
+            snprintf(path, sizeof(path), "%.*s%s", dir_len, main_file, libname);
+            src = read_file_content(path);
+            if (src) { strncpy(resolved_name, path, resolved_size - 1); return src; }
+        }
+    }
+
+    return NULL;
+}
+
 ASTNode* parse(const char* source) {
     src_ptr = source; current_line = 1; advance();
     ASTNode* program = create_node(AST_PROGRAM);
@@ -242,33 +274,64 @@ ASTNode* parse(const char* source) {
         if (current_token.type == TOKEN_ISPOLZOVAT) {
             int err_line = current_line;
             advance();
-            char libname[256]; strcpy(libname, current_token.value);
-            advance();
-            if (current_token.type == TOKEN_UNKNOWN) {
-                advance();
-                if (current_token.type == TOKEN_IDENTIFIER) advance();
-            }
-            if (!strstr(libname, ".")) strcat(libname, ".kum");
 
-            char* lib_source = read_file_content(libname);
+            // ========================
+            // УЛУЧШЕНИЕ: Поддержка двух форматов:
+            //   использовать математика        → ищет математика.kum
+            //   использовать "libs/math.kum"   → точный путь в кавычках
+            // ========================
+            char libname[512] = {0};
+
+            if (current_token.type == TOKEN_STRING) {
+                // Формат с кавычками: использовать "путь/к/файлу.kum"
+                strncpy(libname, current_token.value, sizeof(libname) - 1);
+                advance();
+            } else {
+                // Формат без кавычек: использовать математика  (или математика.kum)
+                strncpy(libname, current_token.value, sizeof(libname) - 1);
+                advance();
+                // Обработка точки: использовать математика.kum
+                if (current_token.type == TOKEN_UNKNOWN) {
+                    advance(); // пропустить точку
+                    if (current_token.type == TOKEN_IDENTIFIER) {
+                        // Это расширение (.kum или другое)
+                        strncat(libname, ".", sizeof(libname) - strlen(libname) - 1);
+                        strncat(libname, current_token.value, sizeof(libname) - strlen(libname) - 1);
+                        advance();
+                    }
+                }
+                // Добавить .kum если нет расширения
+                if (!strstr(libname, ".")) strncat(libname, ".kum", sizeof(libname) - strlen(libname) - 1);
+            }
+
+            // Ищем библиотеку
+            char resolved[512] = {0};
+            char* lib_source = find_and_load_lib(libname, current_filename, resolved, sizeof(resolved));
+
             if (lib_source) {
-                const char* old_src = src_ptr; int old_line = current_line; Token old_token = current_token;
-                
-                // СОХРАНЯЕМ ИМЯ ФАЙЛА, ЧТОБЫ УЗЛЫ БИБЛИОТЕКИ ЗНАЛИ СВОЙ ФАЙЛ
-                const char* old_file = current_filename;
-                char* lib_filename_ptr = strdup(libname);
-                current_filename = lib_filename_ptr; 
+                const char* old_src   = src_ptr;
+                int          old_line  = current_line;
+                Token        old_token = current_token;
+                const char*  old_file  = current_filename;
+
+                // БАГ #3 ИСПРАВЛЕН: используем resolved (найденный путь), не теряем память
+                current_filename = resolved[0] ? resolved : libname;
 
                 src_ptr = lib_source; current_line = 1; advance();
                 while (current_token.type != TOKEN_EOF) {
                     if (current_token.type == TOKEN_ALG) add_child(program, parse_func_def()); else advance();
                 }
-                
-                // ВОССТАНАВЛИВАЕМ
+
                 current_filename = old_file;
-                src_ptr = old_src; current_line = old_line; current_token = old_token; free(lib_source);
+                src_ptr = old_src; current_line = old_line; current_token = old_token;
+                free(lib_source);
             } else {
-                parse_error(current_filename, err_line, "КРИТИЧЕСКАЯ ОШИБКА: Не удалось найти библиотеку", libname);
+                printf("\n\033[1;31m[ОШИБКА]\033[0m Файл: \033[1;33m%s\033[0m, Строка \033[1;36m%d\033[0m\n"
+                       "Библиотека \033[1;35m%s\033[0m не найдена.\n"
+                       "Искал в: \033[0;37m./%s\033[0m, \033[0;37mlibs/%s\033[0m\n"
+                       "Совет: положите файл рядом с программой или в папку \033[1;32mlibs/\033[0m\n",
+                       current_filename, err_line, libname, libname, libname);
+                exit(1);
             }
         } else if (current_token.type == TOKEN_ALG) {
             add_child(program, parse_func_def());
