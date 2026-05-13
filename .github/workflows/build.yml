@@ -12,7 +12,6 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Compile (Windows)
-      # ИСПРАВЛЕНО: добавлен -lm для math.h функций
       run: |
         gcc -O3 src/main.c src/lexer.c src/parser.c src/interpreter.c -lws2_32 -lwininet -lm -o kumir2.exe
 
@@ -30,8 +29,9 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Compile (Linux)
+      # БАГ #2 ИСПРАВЛЕН: добавлен -ldl для FFI (dlopen/dlsym в interpreter.c)
       run: |
-        gcc -O3 src/main.c src/lexer.c src/parser.c src/interpreter.c -lm -o kumir2
+        gcc -O3 src/main.c src/lexer.c src/parser.c src/interpreter.c -lm -ldl -o kumir2
 
     - name: Upload Linux artifact
       uses: actions/upload-artifact@v4
